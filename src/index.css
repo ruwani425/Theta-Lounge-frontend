@@ -1,0 +1,10 @@
+/* src/index.css */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* You can add any custom global styles below this */
+/* .my-custom-class {
+     // ...
+} */
