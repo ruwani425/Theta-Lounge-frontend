@@ -13,36 +13,20 @@ import {
   Navigate,
   Outlet,
 } from "react-router-dom"; // REMOVED TO PREVENT CONFLICT WITH MOCK IMPLEMENTATIONS
+import type {
+  AdminCardProps,
+  AuthContextType,
+  AuthProviderProps,
+} from "./types";
+import { getCookie, removeCookie, setCookie } from "./utils/cookieUtils";
+import { AuthProvider, useAuth } from "./context/AuthContext";
+import NavBar, { Layout } from "./components/layout/NavBar";
 import ClientPage from "./pages/ClientPage";
 import LoginPage from "./pages/LoginPage";
 import AdminDashboard from "./pages/admin/AdminDashboard";
 import AdminUsersPage from "./pages/admin/AdminUsersPage";
 import AdminProductsPage from "./pages/admin/AdminProductsPage";
-import { AuthProvider } from "./context/AuthContext";
-import { Layout } from "./components/layout/NavBar";
 import { ProtectedRoute } from "./components/ProtectedRoute";
-
-// =========================================================================
-// 1. TYPESCRIPT INTERFACES
-// =========================================================================
-
-interface AuthContextType {
-  isAuthenticated: boolean | null;
-  login: (token?: string) => void;
-  logout: () => void;
-}
-
-interface AuthProviderProps {
-  children: ReactNode;
-}
-
-interface AdminCardProps {
-  title: string;
-  description: string;
-  path: string;
-}
-
-//==============================================================
 
 export default function App() {
   return (

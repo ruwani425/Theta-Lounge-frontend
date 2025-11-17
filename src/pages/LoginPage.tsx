@@ -1,21 +1,22 @@
 // src/pages/LoginPage.tsx
 
-import React, { useState, type FormEvent } from "react";
+import React, { useEffect, useState, type FormEvent } from "react";
 import { useAuth } from "../context/AuthContext";
+import { useNavigate } from "react-router-dom";
 
 const LoginPage: React.FC = () => {
   const { login, isAuthenticated } = useAuth();
+  const navigate = useNavigate();
   const [username, setUsername] = useState<string>("admin");
   const [password, setPassword] = useState<string>("password");
 
-  // Redirect if already authenticated
-  if (isAuthenticated) {
-    // Simulates <Navigate to="/admin/dashboard" replace />
-    if (typeof window !== "undefined") {
-      window.location.href = "/admin/dashboard";
+  useEffect(() => {
+    // Redirect if already authenticated
+    if (isAuthenticated) {
+      // Simulates <Navigate to="/admin/dashboard" replace />
+      navigate("/admin/dashboard", { replace: true });
     }
-    return null;
-  }
+  }, [isAuthenticated, navigate]);
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();

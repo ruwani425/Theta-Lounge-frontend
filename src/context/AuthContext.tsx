@@ -36,11 +36,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   };
 
   // Check for cookie on initial load
+  //call during create component
   useEffect(() => {
     const token = getCookie(AUTH_TOKEN_KEY);
     setIsAuthenticated(!!token);
+    //!! double checking
   }, []);
-
   const value: AuthContextType = { isAuthenticated, login, logout };
 
   if (isAuthenticated === null) {
