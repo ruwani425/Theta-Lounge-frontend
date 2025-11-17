@@ -27,6 +27,7 @@ import AdminDashboard from "./pages/admin/AdminDashboard";
 import AdminUsersPage from "./pages/admin/AdminUsersPage";
 import AdminProductsPage from "./pages/admin/AdminProductsPage";
 import { ProtectedRoute } from "./components/ProtectedRoute";
+import SignupPage from "./pages/SignUpPage";
 
 export default function App() {
   return (
@@ -38,6 +39,7 @@ export default function App() {
             {/* PUBLIC ROUTES: Accessible to everyone */}
             <Route index element={<ClientPage />} />
             <Route path="login" element={<LoginPage />} />
+            <Route path="signup" element={<SignupPage />} />
 
             {/* PROTECTED ADMIN ROUTES: Protected by the <ProtectedRoute /> element */}
             <Route path="admin" element={<ProtectedRoute />}>
