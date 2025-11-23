@@ -3,63 +3,86 @@
 import React, { useEffect, useState, type FormEvent } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { ArrowLeft, User2, Mail, Lock } from "lucide-react";
-// 💡 IMPORT THE REDUX-INTEGRATED HOOK
 import { useAuth } from '../components/AuthProvider'; 
+import { signInWithGoogle } from "../firebase/firebase-config";
 
-// --- MOCK AUTHENTICATION LOGIC (Moved to Redux Slice, but kept here for type reference) ---
 
+// --- MOCK AUTHENTICATION LOGIC (Omitted for brevity, kept same) ---
 interface MockUser {
-    email: string;
-    password: string;
-    role: 'admin' | 'client';
+    email: string;
+    password: string;
+    role: 'admin' | 'client';
 }
 
-// 1. Define Mock Users and Roles (Kept locally for login validation logic)
 const MOCK_USERS: MockUser[] = [
-    // Use these credentials to test:
-    { email: "admin@theta.com", password: "password123", role: 'admin' },
-    { email: "client@theta.com", password: "userpass", role: 'client' },
+    { email: "admin@theta.com", password: "password123", role: 'admin' },
+    { email: "client@theta.com", password: "userpass", role: 'client' },
 ];
 
-// --- CUSTOM STYLES (ORIGINAL UI STYLES PRESERVED) ---
-// src/pages/LoginPage.tsx
-
+// --- CUSTOM STYLES (UPDATED background-image URL) ---
+/*
+  BASED ON THETA LOUNGE PALETTE (approximation of main blues):
+  Dark Blue: #07476D (Darkest color from the top color palette row)
+  Medium Blue: #196D9C (A mid-tone blue from the palette)
+  Light Blue Accent: #94CCE7 (Light blue from the palette, used for borders/accents)
+  Text/Light BG: #F0F8FF (Approximation of very light blue/off-white)
+*/
 const CustomStyle = `
-  .text-dark-blue-600 { color: #035C84; }
-  .bg-dark-blue-600 { background-color: #035C84; }
-  .hover\\:bg-dark-blue-700:hover { background-color: #0873A1; }
-  .text-dark-blue-800 { color: #003F5C; }
-  .bg-light-blue-50 { background-color: #F0F8FF; } 
+  .text-dark-blue-800 { color: #07476D; }
+  .bg-dark-blue-800 { background-color: #07476D; }
+  .hover\\:bg-medium-blue-700:hover { background-color: #196D9C; }
+  .text-medium-blue-700 { color: #196D9C; } 
   .bg-light-blue-200 { background-color: #94CCE7; }
-  .text-light-blue-400 { color: #2DA0CC; } 
-  .focus\\:ring-dark-blue-600:focus { --tw-ring-color: #035C84; }
-  .focus\\:border-dark-blue-600:focus { border-color: #035C84; }
+  .text-light-gray-50 { color: #F0F8FF; } 
+  .focus\\:ring-dark-blue-800:focus { --tw-ring-color: #07476D; }
+  .focus\\:border-dark-blue-800:focus { border-color: #07476D; }
 
-  /* 💡 ADD THE GRADIENT COLOR STOPS HERE */
-  .from-dark-blue-600 { 
-    --tw-gradient-from: #035C84; 
-    --tw-gradient-to: rgba(3, 92, 132, 0); /* Tailwind default behavior */
-    --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to);
-  }
+  /* Gradient for Left Panel */
+  .from-theta-dark { 
+    --tw-gradient-from: #07476D; 
+    --tw-gradient-to: rgba(7, 71, 109, 0);
+    --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to);
+  }
+  .to-theta-medium { 
+    --tw-gradient-to: #196D9C; 
+  }
+  .via-theta-dark {
+    --tw-gradient-via: #07476D;
+  }
 
-  .to-dark-blue-700 { 
-    --tw-gradient-to: #0873A1; 
-  }
-
-  /* REMOVE the manual .bg-gradient-to-r definitions */
+  /* Custom background image class with reliable placeholder */
+  .auth-bg-image {
+    /* Using a simple placeholder service with a dark blue background color: #07476D */
+    background-image: url('https://placehold.co/1000x800/07476D/FFFFFF?text=Background%20Image'); 
+  }
 `;
 
+// Google Icon Component (Simplified SVG) - UNCHANGED
+const GoogleIcon: React.FC = () => (
+  <svg 
+    version="1.1" 
+    xmlns="http://www.w3.org/2000/svg" 
+    viewBox="0 0 48 48" 
+    className="w-5 h-5"
+    fill="currentColor"
+  >
+    <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.06l7.98 6.19C12.43 13.75 17.5 9.5 24 9.5z" />
+    <path fill="#4285F4" d="M46.98 24.55c0-.67-.06-1.34-.17-2H24v4.61h12.48c-.51 2.94-2.26 5.4-4.78 7.04l6.85 5.29c4.04-3.73 6.39-9.25 6.39-16.94z" />
+    <path fill="#FBBC05" d="M9.98 36.29C9.28 34.3 8.94 32.22 8.94 30.09c0-2.13.34-4.21 1.04-6.2l-7.98-6.19C1.13 18.91 0 21.37 0 24.09c0 3.81.97 7.42 2.69 10.6l7.29 5.66L9.98 36.29z" />
+    <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.77l-6.85-5.29c-2.07 1.39-4.83 2.2-9.04 2.2-6.52 0-11.58-4.25-13.48-10.37l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
+    <path fill="none" d="M0 0h48v48H0z" />
+  </svg>
+);
+
+
 const LoginPage: React.FC = () => {
-  // 💡 Use Redux state and actions
   const { isAuthenticated, userRole, login } = useAuth(); 
-  
   const navigate = useNavigate();
   const [email, setEmail] = useState<string>("");
   const [password, setPassword] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Check Redux state for authentication status and role
     if (isAuthenticated) {
         if (userRole === 'admin') {
             navigate("/admin/dashboard", { replace: true });
@@ -67,123 +90,105 @@ const LoginPage: React.FC = () => {
             navigate("/", { replace: true });
         }
     }
-    // NOTE: userRole is a dependency because it determines the navigation target
   }, [isAuthenticated, userRole, navigate]); 
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     setError(null);
 
-    // 1. Find matching user
     const user = MOCK_USERS.find(
         u => u.email.toLowerCase() === email.toLowerCase() && u.password === password
     );
 
     if (user) {
-        // 2. Trigger Redux login action
         login(user.role);
-        // Note: Navigation will be handled by the useEffect hook once the Redux state updates.
     } else {
-        // 3. Handle invalid credentials
         setError("Invalid email or password. Please try again. (Test credentials: admin@theta.com/password123 or client@theta.com/userpass)");
         console.error("Invalid credentials.");
     }
   };
 
-  return (
-    <div className="flex items-center justify-center p-8 bg-light-blue-50 min-h-screen">
-      <style dangerouslySetInnerHTML={{ __html: CustomStyle }} />
-      <div className="w-full max-w-md bg-white p-8 rounded-xl shadow-2xl border border-gray-100">
-        <div className="flex justify-center mb-6">
-          <div className="p-3 bg-dark-blue-600 rounded-full shadow-xl">
-            <User2 className="h-8 w-8 text-white" />
-          </div>
-          
-        </div>
-        <h2 className="text-4xl font-serif font-bold text-dark-blue-800 mb-3 text-center leading-tight">
-          Welcome Back
-        </h2>
-        <h3 className="text-center font-display font-medium text-gray-600 mb-8 text-lg">
-          Sign in to your Theta Lounge account
-        </h3>
-        
-        {/* Error Message Display */}
-        {error && (
-            <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-xl border border-red-300 text-sm font-medium">
-                {error}
-            </div>
-        )}
+  const handleGoogleSignIn =async () => {
+   try {
+      await signInWithGoogle();
+    } catch (error) {
+      // Error handling is done in firebase-config, but you can add UI feedback here
+      console.error("Failed to sign in via Google.");
+    }
+  };
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label
-              htmlFor="email"
-              className="block text-sm font-display font-semibold text-gray-700 mb-2"
+  return (
+    <div className="min-h-screen flex flex-col lg:flex-row">
+      {/* Left Side - Login UI - UPDATED GRADIENT & TEXT COLOR */}
+      <div className="flex-1 **bg-gradient-to-br from-theta-dark via-theta-dark to-theta-medium** flex items-center justify-center px-6 py-12 lg:px-12">
+        <div className="max-w-md w-full space-y-10">
+          {/* Heading - UPDATED TEXT COLOR */}
+          <div className="text-center">
+            <h1 className="text-5xl font-extrabold **text-white** tracking-tight">
+              Welcome Back
+            </h1>
+            <p className="mt-3 **text-light-gray-50** text-lg">
+              Sign in to continue your journey
+            </p>
+          </div>
+
+          {/* Google Button Card - UPDATED TEXT COLOR */}
+          <div className="bg-white/10 backdrop-blur-xl rounded-3xl shadow-2xl p-10 border border-white/20">
+            <button 
+              className="w-full flex items-center justify-center gap-4 bg-white text-gray-800 font-medium rounded-2xl px-8 py-5 hover:shadow-xl transition-all duration-300 group"
+              onClick={handleGoogleSignIn}
             >
-              Email
-            </label>
-            <div className="relative">
-              <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />{" "}
-              <input
-                id="email"
-                type="text"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="Enter your email address"
-                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-dark-blue-600 focus:border-dark-blue-600 font-sans transition-all duration-300"
-                required
-              />
-            </div>{" "}
-          </div>{" "}
-          <div>
-            {" "}
-            <label
-              htmlFor="password"
-              className="block text-sm font-display font-semibold text-gray-700 mb-2"
-            >
-              Password{" "}
-            </label>
-            <div className="relative">
-              <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />{" "}
-              <input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter your password"
-                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-dark-blue-600 focus:border-dark-blue-600 font-sans transition-all duration-300"
-                required
-              />
-            </div>{" "}
-          </div>{" "}
-          <button
-            type="submit"
-            className="w-full py-3.5 px-4 bg-gradient-to-r from-dark-blue-600 to-dark-blue-700 text-white font-display font-bold rounded-xl shadow-lg hover:shadow-2xl transition-all duration-300 transform hover:scale-105"
-          >
-            Log In{" "}
-          </button>{" "}
-        </form>{" "}
-        <div className="mt-6 pt-4 border-t border-gray-200 space-y-3 text-center">
-          {" "}
-          <p className="text-sm font-sans text-gray-600">
-            Don't have an account?{" "}
-            <NavLink
-              to="/signup"
-              className="font-display font-bold text-dark-blue-600 hover:text-light-blue-400 transition duration-150"
-            >
-              Sign up{" "}
-            </NavLink>{" "}
-          </p>{" "}
-          <NavLink
-            to="/"
-            className="inline-flex items-center text-sm font-display font-semibold text-gray-500 hover:text-dark-blue-600 transition duration-150"
-          >
-            <ArrowLeft className="w-4 h-4 mr-1" />
-            Back to home{" "}
-          </NavLink>{" "}
-        </div>{" "}
+              <svg className="w-6 h-6" viewBox="0 0 24 24">
+                <path
+                  fill="#4285F4"
+                  d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                />
+                <path
+                  fill="#34A853"
+                  d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                />
+                <path
+                  fill="#FBBC05"
+                  d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
+                />
+                <path
+                  fill="#EA4335"
+                  d="M12 6.75c1.66 0 3.14.57 4.31 1.69l3.23-3.23C17.46 2.98 14.97 2 12 2 7.7 2 3.99 4.47 2.18 7.07l3.66 2.84C6.71 7.47 9.14 6.75 12 6.75z"
+                />
+              </svg>
+              <span className="text-lg">Continue with Google</span>
+            </button>
+
+            <p className="mt-8 text-center text-sm **text-light-gray-50**">
+              By continuing, you agree to our{" "}
+              <a href="#" className="underline hover:text-white">
+                Terms of Service
+              </a>{" "}
+              and{" "}
+              <a href="#" className="underline hover:text-white">
+                Privacy Policy
+              </a>
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Right Side - Hero Image - UNCHANGED */}
+      <div className="hidden lg:block flex-1 relative overflow-hidden bg-gray-900">
+        <img
+          src="/creative-thinking-w800.png"
+          alt="Welcome"
+          className="absolute inset-0 h-full w-full object-cover"
+        />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
         
-      </div>{" "}
+        <div className="absolute bottom-12 left-12 text-white max-w-lg">
+          <h2 className="text-5xl font-bold mb-4">Start Something Amazing</h2>
+          <p className="text-xl opacity-90">
+            Join thousands of creators building the future.
+          </p>
+        </div>
+      </div>
     </div>
   );
 };

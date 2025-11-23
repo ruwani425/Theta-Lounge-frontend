@@ -39,7 +39,7 @@ export const Layout: React.FC = () => {
       
       <main className="mx-auto pb-0"> 
         <Outlet />
-        <Footer />
+      {!shouldHideNavbar && <Footer />}{" "}
       </main>
     </div>
   );
