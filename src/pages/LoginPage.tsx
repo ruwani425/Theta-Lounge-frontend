@@ -1,14 +1,14 @@
 "use client"
 
 import type React from "react"
-import { useState, type FormEvent } from "react"
+import { useEffect, useState, type FormEvent } from "react"
 import { useNavigate } from "react-router-dom"
 import { Mail, Lock, Droplet } from "lucide-react"
 import axios from "axios"
 import { signInWithGoogle } from "../firebase/firebase-config"
+import { useAuth } from "../components/AuthProvider"
 
 
-// Mock Firebase UserCredential type and function
 type UserCredential = {
   user: {
     displayName: string | null;
@@ -18,76 +18,74 @@ type UserCredential = {
   };
 };
 
-const mockSignInWithGoogle = async (): Promise<UserCredential> => {
-    console.log("MOCK: Attempting Google Sign-In...");
-    await new Promise(resolve => setTimeout(resolve, 500)); // Simulate delay
-    return {
-        user: {
-            displayName: "Mocked User",
-            email: "mock.google.user@example.com",
-            photoURL: "https://placehold.co/50x50/4285F4/ffffff?text=G",
-            uid: "mock-firebase-uid-12345",
-        }
-    };
-};
+// const mockSignInWithGoogle = async (): Promise<UserCredential> => {
+//     console.log("MOCK: Attempting Google Sign-In...");
+//     await new Promise(resolve => setTimeout(resolve, 500)); // Simulate delay
+//     return {
+//         user: {
+//             displayName: "Mocked User",
+//             email: "mock.google.user@example.com",
+//             photoURL: "https://placehold.co/50x50/4285F4/ffffff?text=G",
+//             uid: "mock-firebase-uid-12345",
+//         }
+//     };
+// };
 
-// Mock useAuth Hook
-const useAuth = () => {
-    // These values are mocked since AuthProvider is unresolved.
-    const isAuthenticated = true;
-    const userRole = "client";
-    const login = (role: string) => {
-        console.log(`MOCK: User logged in with role: ${role}`);
-        // In a real scenario, this would handle token/role storage.
-    };
-    return { isAuthenticated, userRole, login };
-};
 
 // Backend API Configuration
 const GOOGLE_API_URL = "http://localhost:5000/api/auth/google-auth"; 
 
 const LoginPage: React.FC = () => {
-  const { login } = useAuth()
+  const { login, isAuthenticated, userRole } = useAuth();
   const navigate = useNavigate()
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      if (userRole === "admin") navigate("/admin/dashboard");
+      else navigate("/");
+    }
+  }, [isAuthenticated, userRole, navigate]);
+
+
   const [email, setEmail] = useState<string>("")
   const [password, setPassword] = useState<string>("")
   const [error, setError] = useState<string | null>(null)
   const [focusedField, setFocusedField] = useState<string | null>(null)
 
+  
+
   type UserRole = "admin" | "client"
 
-  interface TestUser {
-    email: string
-    password: string
-    role: UserRole
-  }
+  // interface TestUser {
+  //   email: string
+  //   password: string
+  //   role: UserRole
+  // }
 
 
   // TEMPORARY USERS ARRAY (Frontend Only) - Only for the handleSubmit function
-  const testUsers:TestUser[]= [
-    {
-      email: "admin@theta.com",
-      password: "password123",
-      role: "admin",
-    },
-    {
-      email: "client@theta.com",
-      password: "userpass",
-      role: "client",
-    },
-  ];
+  // const testUsers:TestUser[]= [
+  //   {
+  //     email: "admin@theta.com",
+  //     password: "password123",
+  //     role: "admin",
+  //   },
+  //   {
+  //     email: "client@theta.com",
+  //     password: "userpass",
+  //     role: "client",
+  //   },
+  // ];
 
 const handleGoogleSignIn = async () => {
   setError(null);
   try {
-    // 1. Real Firebase Google Sign-In
     const firebaseUser = await signInWithGoogle();
 
     if (!firebaseUser.email || !firebaseUser.uid) {
       throw new Error("Google sign-in did not return required user data.");
     }
 
-    // 2. Send secure user data to backend
     const googleUserData = {
       name: firebaseUser.displayName,
       email: firebaseUser.email,
@@ -99,20 +97,16 @@ const handleGoogleSignIn = async () => {
 
     const backendResponse = await axios.post(GOOGLE_API_URL, googleUserData);
 
-    // 3. Backend response
     const { token, user: backendUser } = backendResponse.data;
 
     console.log("Token from backend:", token);
 
-    // 4. Determine role (TEMP)
     const role: UserRole = backendUser?.email?.includes("admin")
       ? "admin"
       : "client";
 
-    // 5. Update auth state
-    login(role);
+    login(role, token);
 
-    // 6. Redirect
     if (role === "admin") {
       navigate("/admin/dashboard");
     } else {
@@ -138,39 +132,40 @@ const handleGoogleSignIn = async () => {
 };
 
 
-  // Standard Email/Password Submission (Still using temporary array logic)
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
 
-    // 1. Find user in test array
-    const foundUser = testUsers.find(
-      (u) => u.email === email && u.password === password
-    );
+    try {
+      const response = await axios.post("/api/auth/login", { email, password });
+      const { token, user } = response.data;
 
-    if (!foundUser) {
-      setError("Invalid email or password");
-      return;
-    }
+      if (!user?.role || !token) {
+        setError("Invalid login response from server");
+        return;
+      }
 
-    // 2. Login using your AuthProvider
-    login(foundUser.role);
+      login(user.role, token);
 
-    // 3. Redirect based on role
-    if (foundUser.role === "admin") {
-      navigate("/admin/dashboard");
-    } else {
-      navigate("/")
+      if (user.role === "admin") navigate("/admin/dashboard");
+      else navigate("/");
+    } catch (err) {
+      if (axios.isAxiosError(err)) {
+        setError(err.response?.data?.message || "Server error");
+      } else if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError("Unknown error occurred");
+      }
     }
   };
 
 
+
   return (
     <div className="min-h-screen w-screen overflow-x-hidden flex flex-col lg:flex-row bg-gradient-to-br from-slate-50 to-blue-50">
-      {/* Left Side - Login UI with improved UX */}
       <div className="flex-1 flex items-center justify-center px-6 py-12 lg:px-16">
         <div className="max-w-md w-full space-y-8">
-          {/* Header - Improved Visual Hierarchy */}
           <div className="text-center space-y-3">
             <div className="flex justify-center mb-4">
               <div className="p-3 bg-gradient-to-br from-blue-100 to-blue-50 rounded-full">
@@ -182,18 +177,16 @@ const handleGoogleSignIn = async () => {
             <p className="text-sm text-slate-500">Experience the power of floating therapy</p>
           </div>
 
-          {/* Error Message - Better Visibility */}
           {error && (
             <div className="p-4 bg-red-50 border border-red-200 rounded-2xl">
               <p className="text-sm text-red-700">{error}</p>
             </div>
           )}
 
-          {/* Google Sign In Card */}
           <div className="bg-white rounded-3xl shadow-md p-6 border border-blue-100 hover:shadow-lg transition-shadow duration-300">
             <button
               className="w-full flex items-center justify-center gap-3 bg-gradient-to-r from-blue-50 to-slate-50 hover:from-blue-100 hover:to-slate-100 text-slate-900 font-medium rounded-2xl px-6 py-3.5 border border-blue-200 transition-all duration-300"
-              onClick={handleGoogleSignIn} // Calls the updated function
+              onClick={handleGoogleSignIn}
             >
               <svg className="w-5 h-5" viewBox="0 0 24 24">
                 <path
@@ -216,7 +209,6 @@ const handleGoogleSignIn = async () => {
               <span>Continue with Google</span>
             </button>
 
-            {/* Divider */}
             <div className="my-6 flex items-center gap-3">
               <div className="flex-1 h-px bg-slate-200" />
               <span className="text-sm text-slate-500">or</span>
@@ -224,7 +216,6 @@ const handleGoogleSignIn = async () => {
             </div>
 
             <form onSubmit={handleSubmit}>
-              {/* Email Field - Enhanced with focus states */}
               <div className="space-y-2 mb-4">
                 <label className="text-sm font-medium text-slate-700">Email</label>
                 <div className="relative">
@@ -245,7 +236,6 @@ const handleGoogleSignIn = async () => {
                 </div>
               </div>
 
-              {/* Password Field - Enhanced with focus states */}
               <div className="space-y-2 mb-6">
                 <label className="text-sm font-medium text-slate-700">Password</label>
                 <div className="relative">
@@ -266,9 +256,8 @@ const handleGoogleSignIn = async () => {
                 </div>
               </div>
 
-              {/* Submit Button */}
               <button
-                type="submit" // Changed from onClick to type="submit" for form
+                type="submit"
                 className="w-full py-3.5 px-4 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-semibold rounded-2xl transition-all duration-300 shadow-md hover:shadow-lg transform hover:scale-105 active:scale-95"
               >
                 Sign In to Theta Lounge
@@ -276,7 +265,6 @@ const handleGoogleSignIn = async () => {
             </form>
           </div>
 
-          {/* Footer Text */}
           <div className="text-center space-y-3">
             <p className="text-sm text-slate-600">
               By signing in, you agree to our{" "}
@@ -293,7 +281,6 @@ const handleGoogleSignIn = async () => {
         </div>
       </div>
 
-      {/* Right Side - Floating Therapy Image */}
       <div className="hidden lg:flex flex-1 relative overflow-hidden bg-gradient-to-br from-blue-600 via-blue-700 to-slate-900">
         <img
           src="/peaceful-person-floating-in-calm-water-spa-therapy.jpg"
@@ -301,17 +288,14 @@ const handleGoogleSignIn = async () => {
           className="absolute inset-0 h-full w-full object-cover opacity-90"
         />
 
-        {/* Overlay for depth */}
         <div className="absolute inset-0 bg-gradient-to-t from-blue-900/80 via-blue-800/40 to-transparent" />
 
-        {/* Content Overlay */}
         <div className="absolute bottom-0 left-0 right-0 p-12 text-white space-y-4">
           <h2 className="text-5xl font-bold leading-tight text-pretty">Find Your Inner Peace</h2>
           <p className="text-xl opacity-95 max-w-sm text-pretty">
             Experience the transformative power of floatation therapy and unlock your true potential.
           </p>
 
-          {/* Benefits List */}
           <div className="pt-6 space-y-3">
             <div className="flex items-center gap-3">
               <div className="w-2 h-2 rounded-full bg-blue-300" />
