@@ -1,28 +1,16 @@
-"use client"
+"use client";
 
-import type React from "react"
-import { useEffect, useState, type FormEvent } from "react"
-import { useNavigate } from "react-router-dom"
-import { Mail, Lock, Droplet } from "lucide-react"
-import axios from "axios"
-import { signInWithGoogle } from "../firebase/firebase-config"
-import { useAuth } from "../components/AuthProvider"
-
-
-type UserCredential = {
-  user: {
-    displayName: string | null;
-    email: string | null;
-    photoURL: string | null;
-    uid: string;
-  };
-};
-
-const GOOGLE_API_URL = "http://localhost:5000/api/auth/google-auth"; 
+import type React from "react";
+import { useEffect, useState, type FormEvent } from "react";
+import { useNavigate } from "react-router-dom";
+import { Mail, Lock, Droplet } from "lucide-react";
+import { signInWithGoogle } from "../firebase/firebase-config";
+import { useAuth } from "../components/AuthProvider";
+import apiRequest from "../core/axios";
 
 const LoginPage: React.FC = () => {
   const { login, isAuthenticated, userRole } = useAuth();
-  const navigate = useNavigate()
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -33,15 +21,12 @@ const LoginPage: React.FC = () => {
     }
   }, [isAuthenticated, userRole, navigate]);
 
+  const [email, setEmail] = useState<string>("");
+  const [password, setPassword] = useState<string>("");
+  const [error, setError] = useState<string | null>(null);
+  const [focusedField, setFocusedField] = useState<string | null>(null);
 
-  const [email, setEmail] = useState<string>("")
-  const [password, setPassword] = useState<string>("")
-  const [error, setError] = useState<string | null>(null)
-  const [focusedField, setFocusedField] = useState<string | null>(null)
-
-  
-
-  type UserRole = "admin" | "client"
+  type UserRole = "admin" | "client";
 
   const handleGoogleSignIn = async () => {
     setError(null);
@@ -61,9 +46,16 @@ const LoginPage: React.FC = () => {
 
       console.log("Sending real Firebase user to backend:", googleUserData);
 
-      const backendResponse = await axios.post(GOOGLE_API_URL, googleUserData);
+      const backendResponse = (await apiRequest.post(
+        "/auth/google-auth",
+        googleUserData
+      )) as any;
+      if (!backendResponse) {
+        console.log(backendResponse);
+        throw new Error("No response data from backend");
+      }
 
-      const { token, user: backendUser } = backendResponse.data;
+      const { token, user: backendUser } = backendResponse;
 
       console.log("Token from backend:", token);
 
@@ -78,53 +70,9 @@ const LoginPage: React.FC = () => {
       }
     } catch (error) {
       console.error("Google Auth Integration Error:", error);
-
-      let errorMsg;
-
-      if (axios.isAxiosError(error)) {
-        errorMsg = `Backend Error: ${
-          error.response?.data?.message || "Server issue"
-        }`;
-      } else if (error instanceof Error) {
-        errorMsg = `Client Error: ${error.message}`;
-      } else {
-        errorMsg = "Unknown error occurred.";
-      }
-
-      setError(errorMsg);
+      setError("Google Auth Integration Error" + error);
     }
   };
-
-
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault();
-    setError(null);
-
-    try {
-      const response = await axios.post("/api/auth/login", { email, password });
-      const { token, user } = response.data;
-
-      if (!user?.role || !token) {
-        setError("Invalid login response from server");
-        return;
-      }
-
-      login(user.role, token);
-
-      if (user.role === "admin") navigate("/admin/dashboard");
-      else navigate("/");
-    } catch (err) {
-      if (axios.isAxiosError(err)) {
-        setError(err.response?.data?.message || "Server error");
-      } else if (err instanceof Error) {
-        setError(err.message);
-      } else {
-        setError("Unknown error occurred");
-      }
-    }
-  };
-
-
 
   return (
     <div className="min-h-screen w-screen overflow-x-hidden flex flex-col lg:flex-row bg-gradient-to-br from-slate-50 to-blue-50">
@@ -136,9 +84,15 @@ const LoginPage: React.FC = () => {
                 <Droplet className="w-8 h-8 text-blue-600" />
               </div>
             </div>
-            <h1 className="text-4xl font-bold text-slate-900 tracking-tight">Theta Lounge</h1>
-            <p className="text-lg text-slate-600 font-light">Welcome to Your Sanctuary</p>
-            <p className="text-sm text-slate-500">Experience the power of floating therapy</p>
+            <h1 className="text-4xl font-bold text-slate-900 tracking-tight">
+              Theta Lounge
+            </h1>
+            <p className="text-lg text-slate-600 font-light">
+              Welcome to Your Sanctuary
+            </p>
+            <p className="text-sm text-slate-500">
+              Experience the power of floating therapy
+            </p>
           </div>
 
           {error && (
@@ -179,9 +133,11 @@ const LoginPage: React.FC = () => {
               <div className="flex-1 h-px bg-slate-200" />
             </div>
 
-            <form onSubmit={handleSubmit}>
+            <form>
               <div className="space-y-2 mb-4">
-                <label className="text-sm font-medium text-slate-700">Email</label>
+                <label className="text-sm font-medium text-slate-700">
+                  Email
+                </label>
                 <div className="relative">
                   <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 pointer-events-none" />
                   <input
@@ -201,7 +157,9 @@ const LoginPage: React.FC = () => {
               </div>
 
               <div className="space-y-2 mb-6">
-                <label className="text-sm font-medium text-slate-700">Password</label>
+                <label className="text-sm font-medium text-slate-700">
+                  Password
+                </label>
                 <div className="relative">
                   <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 pointer-events-none" />
                   <input
@@ -240,7 +198,9 @@ const LoginPage: React.FC = () => {
                 Privacy Policy
               </a>
             </p>
-            <p className="text-xs text-slate-500">Test: admin@theta.com / password123 or client@theta.com / userpass</p>
+            <p className="text-xs text-slate-500">
+              Test: admin@theta.com / password123 or client@theta.com / userpass
+            </p>
           </div>
         </div>
       </div>
@@ -255,29 +215,38 @@ const LoginPage: React.FC = () => {
         <div className="absolute inset-0 bg-gradient-to-t from-blue-900/80 via-blue-800/40 to-transparent" />
 
         <div className="absolute bottom-0 left-0 right-0 p-12 text-white space-y-4">
-          <h2 className="text-5xl font-bold leading-tight text-pretty">Find Your Inner Peace</h2>
+          <h2 className="text-5xl font-bold leading-tight text-pretty">
+            Find Your Inner Peace
+          </h2>
           <p className="text-xl opacity-95 max-w-sm text-pretty">
-            Experience the transformative power of floatation therapy and unlock your true potential.
+            Experience the transformative power of floatation therapy and unlock
+            your true potential.
           </p>
 
           <div className="pt-6 space-y-3">
             <div className="flex items-center gap-3">
               <div className="w-2 h-2 rounded-full bg-blue-300" />
-              <span className="text-sm opacity-90">Deep relaxation and stress relief</span>
+              <span className="text-sm opacity-90">
+                Deep relaxation and stress relief
+              </span>
             </div>
             <div className="flex items-center gap-3">
               <div className="w-2 h-2 rounded-full bg-blue-300" />
-              <span className="text-sm opacity-90">Enhanced mental clarity</span>
+              <span className="text-sm opacity-90">
+                Enhanced mental clarity
+              </span>
             </div>
             <div className="flex items-center gap-3">
               <div className="w-2 h-2 rounded-full bg-blue-300" />
-              <span className="text-sm opacity-90">Physical recovery & wellness</span>
+              <span className="text-sm opacity-90">
+                Physical recovery & wellness
+              </span>
             </div>
           </div>
         </div>
       </div>
     </div>
-  )
-}
+  );
+};
 
-export default LoginPage
+export default LoginPage;
