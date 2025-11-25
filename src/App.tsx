@@ -19,6 +19,7 @@ import AddTankPage from "./pages/admin/AddTankPage";
 import ReservationsPage from "./pages/admin/ReservationPage";
 import CalendarManagement from "./pages/admin/CalenderManage";
 import SystemSettings from "./pages/admin/SystemSettingPage";
+import AppointmentsPage from "./pages/admin/AdminAppointmentViewPage";
 
 export default function App() {
   return (
@@ -56,6 +57,7 @@ export default function App() {
               path="calendar-management"
               element={<CalendarManagement />}
             />
+            <Route path="view-appointments" element={<AppointmentsPage/>}/>
             <Route index element={<Navigate to="dashboard" replace />} />
           </Route>
         </Routes>

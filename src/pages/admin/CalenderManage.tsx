@@ -58,7 +58,8 @@ const formatDateToKey = (date: Date): string => date.toISOString().split("T")[0]
 
 export default function CalendarManagement() {
   const navigate = useNavigate()
-  const [currentMonth, setCurrentMonth] = useState<Date>(new Date(2025, 10, 1))
+  // Using fixed date for reliable mock testing of closed dates
+  const [currentMonth, setCurrentMonth] = useState<Date>(new Date(2025, 10, 1)) 
   const [selectedDate, setSelectedDate] = useState<Date | null>(new Date(2025, 11, 15))
   const [operationalHours, setOperationalHours] = useState(INITIAL_OPERATIONAL_HOURS)
   const [closedDates, setClosedDates] = useState(INITIAL_CLOSED_DATES)
@@ -112,6 +113,17 @@ export default function CalendarManagement() {
     setSavedMessage("Changes saved successfully!")
     setTimeout(() => setSavedMessage(""), 3000)
   }
+
+ const handleViewAppointments = () => {
+    if (selectedDate) {
+      // Format the date as 'YYYY-MM-DD' for the query parameter (e.g., 2025-12-15)
+      const dateString = selectedDate.toISOString().split('T')[0];
+
+      // Use navigate() to go to the appointments page, passing the date as a query parameter.
+      // The target path should match your React Router route configuration.
+      navigate(`/admin/view-appointments?date=${dateString}`);    
+    }
+  };
 
   const selectedDateKey = selectedDate ? formatDateToKey(selectedDate) : null
   const isSelectedDateClosed = selectedDateKey ? closedDates.has(selectedDateKey) : false
@@ -201,7 +213,7 @@ export default function CalendarManagement() {
                   })}
                 </h3>
 
-                {/* Close/Open Toggle */}
+                {/* Close/Open Toggle and View Appointments Button */}
                 <div className="space-y-3 mb-6">
                   <button
                     onClick={toggleDateClosed}
@@ -219,6 +231,19 @@ export default function CalendarManagement() {
 
                   {isSelectedDateClosed && (
                     <p className="text-xs text-red-600 text-center">This day is closed for bookings</p>
+                  )}
+
+                {selectedDate &&
+                  selectedDate.getMonth() === currentMonth.getMonth() &&
+                  // Checks if the selected date is today or a future date
+                  selectedDate >= new Date(new Date().setHours(0, 0, 0, 0)) && (
+                    <button
+                      onClick={handleViewAppointments} // This now correctly navigates
+                      className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-secondary text-secondary-foreground rounded-lg font-medium hover:bg-secondary/80 transition-all border border-secondary"
+                    >
+                      <Clock className="h-5 w-5" />
+                      View Appointments
+                    </button>
                   )}
                 </div>
 
