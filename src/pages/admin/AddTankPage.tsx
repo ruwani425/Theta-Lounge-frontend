@@ -2,8 +2,10 @@
 
 import type React from "react"
 import { useState, type FormEvent, type ChangeEvent } from "react"
-import { NavLink } from "react-router-dom"
-import { PlusCircle, Hash, Ruler, Clock, Info, Text, ImageIcon, ArrowLeft, DollarSign, User } from "lucide-react"
+import { NavLink, useNavigate } from "react-router-dom"
+import { PlusCircle, Hash, Ruler, Clock, Info, Text, ArrowLeft, DollarSign, User } from "lucide-react"
+import apiRequest from "../../core/axios"
+import type { AxiosResponse } from "axios"
 
 interface TankFormState {
   name: string
@@ -13,7 +15,6 @@ interface TankFormState {
   sessionDuration: number
   basePrice: number
   benefits: string
-  imagePreview: string | null
 }
 
 const AddTankPage: React.FC = () => {
@@ -25,7 +26,6 @@ const AddTankPage: React.FC = () => {
     sessionDuration: 60,
     basePrice: 80,
     benefits: "Deep relaxation, pain relief, improved sleep.",
-    imagePreview: null,
   })
 
   const handleChange = (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -36,28 +36,31 @@ const AddTankPage: React.FC = () => {
     }))
   }
 
-  const handleImageChange = (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0] || null
-    if (file) {
-      setFormData((prev) => ({
-        ...prev,
-        imagePreview: URL.createObjectURL(file),
-      }))
-    }
-  }
+  const navigate = useNavigate()
 
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
-    console.log("Adding Tank:", formData)
-    alert(`Tank '${formData.name}' added successfully! (Mock submission)`)
+
+    try {
+      console.log("Sending tank data to backend:", formData)
+
+      const response: AxiosResponse<{ message: string; tank?: any }> =
+        await apiRequest.post("/tanks", formData)
+
+      console.log("Backend response:", response.data)
+
+      alert(`Tank '${formData.name}' added successfully!`)
+      navigate("/admin/tank-management")
+    } catch (error: any) {
+      console.error("Failed to save tank", error)
+      alert("Failed to save tank. Check console for details.")
+    }
   }
 
   return (
     <div
       className="min-h-screen p-6 md:p-8 lg:p-10"
-      style={{
-        background: "linear-gradient(135deg, #6BA3C5 0%, #475D73 50%, #0F3A52 100%)",
-      }}
+      style={{ background: "linear-gradient(135deg, #6BA3C5 0%, #475D73 50%, #0F3A52 100%)" }}
     >
       <div className="w-full max-w-4xl mx-auto bg-white rounded-2xl shadow-lg p-8 md:p-10">
         <NavLink
@@ -177,53 +180,6 @@ const AddTankPage: React.FC = () => {
                   This text will be used to generate content suggestions for clients.
                 </p>
               </div>
-
-              {/* Image Upload */}
-              <div className="space-y-2">
-                <label className="flex items-center text-sm font-semibold" style={{ color: "#0F3A52" }}>
-                  <ImageIcon className="w-4 h-4 mr-2" />
-                  Tank Image Upload
-                </label>
-                <div
-                  className="relative p-6 border-2 border-dashed rounded-lg text-center cursor-pointer transition-all duration-200 hover:bg-opacity-50"
-                  style={{
-                    borderColor: "#92B8D9",
-                    backgroundColor: "#F5F9FB",
-                  }}
-                >
-                  <input
-                    id="imageFile"
-                    name="imageFile"
-                    type="file"
-                    accept="image/*"
-                    onChange={handleImageChange}
-                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                  />
-                  <div className="flex flex-col items-center gap-2">
-                    <ImageIcon className="w-8 h-8" style={{ color: "#5A7A95" }} />
-                    <p style={{ color: "#0F3A52" }} className="font-semibold">
-                      Drop your image here
-                    </p>
-                    <p style={{ color: "#999" }} className="text-sm">
-                      or click to browse
-                    </p>
-                  </div>
-                </div>
-
-                {/* Image Preview */}
-                {formData.imagePreview && (
-                  <div className="p-3 border rounded-lg">
-                    <p className="text-sm font-medium mb-2" style={{ color: "#0F3A52" }}>
-                      Preview:
-                    </p>
-                    <img
-                      src={formData.imagePreview || "/placeholder.svg"}
-                      alt="Tank Preview"
-                      className="w-full h-auto max-h-48 object-cover rounded-md shadow-md"
-                    />
-                  </div>
-                )}
-              </div>
             </div>
           </div>
 
@@ -248,7 +204,6 @@ const AddTankPage: React.FC = () => {
 export default AddTankPage
 
 // --- Helper Components ---
-
 interface FormFieldProps {
   id: string
   name: string
