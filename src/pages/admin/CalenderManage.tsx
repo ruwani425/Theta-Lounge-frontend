@@ -1,12 +1,16 @@
 "use client";
 
 import { useEffect, useState, useCallback, useMemo, type ChangeEvent, type FormEvent } from "react";
-// Removed all external date-fns imports
 import { Calendar as CalendarIcon, X, Check, Clock, Edit, Lock, Unlock, Zap, XCircle, CheckCircle, Save, ChevronLeft, ChevronRight } from 'lucide-react';
 
-// --- DATE UTILITY REPLACEMENTS (to avoid date-fns dependency error) ---
+// --- Import the actual apiRequest from axios.ts ---
+import apiRequest from "../../core/axios";
 
-// Replacement for date-fns format (only supports the required formats)
+// --- REMOVED MOCK IMPLEMENTATION ---
+// The actual apiRequest singleton is now used for POST.
+
+// --- DATE UTILITY REPLACEMENTS (Keep as is) ---
+
 const _format = (date: Date, fmt: string): string => {
     const year = date.getFullYear();
     const month = date.getMonth() + 1;
@@ -15,19 +19,15 @@ const _format = (date: Date, fmt: string): string => {
     const daysShort = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     const monthsShort = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     
-    // Simple yyyy-MM-dd
     if (fmt === 'yyyy-MM-dd') {
         return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     }
-    // Simple MMM dd
     if (fmt === 'MMM dd') {
         return `${monthsShort[date.getMonth()]} ${String(day)}`;
     }
-    // Simple EEE
     if (fmt === 'EEE') {
         return daysShort[dayOfWeek];
     }
-    // Complex format for Sidebar (simplified version)
     if (fmt === 'EEEE, MMMM do, yyyy') {
         const daysLong = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
         const monthsLong = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -42,53 +42,40 @@ const _format = (date: Date, fmt: string): string => {
         };
         return `${daysLong[dayOfWeek]}, ${monthsLong[date.getMonth()]} ${day}${suffix(day)}, ${year}`;
     }
-
-    return date.toDateString(); // Fallback
+    return date.toDateString(); 
 };
 
-// Replacement for addDays
 const _addDays = (date: Date, days: number): Date => {
     const newDate = new Date(date);
     newDate.setDate(date.getDate() + days);
     return newDate;
 };
 
-// Replacement for subDays
 const _subDays = (date: Date, days: number): Date => {
     return _addDays(date, -days);
 };
 
-// Replacement for startOfDay
 const _startOfDay = (date: Date): Date => {
     const d = new Date(date);
     d.setHours(0, 0, 0, 0);
     return d;
 };
 
-// Replacement for endOfDay (using start of next day logic)
 const _endOfDay = (date: Date): Date => {
     const d = _addDays(date, 1);
     d.setHours(0, 0, 0, 0);
     return d;
 };
 
-// Replacement for isSameDay
 const _isSameDay = (date1: Date, date2: Date): boolean => {
     return date1.getFullYear() === date2.getFullYear() &&
            date1.getMonth() === date2.getMonth() &&
            date1.getDate() === date2.getDate();
 };
 
-// Replacement for addYears
-const _addYears = (date: Date, years: number): Date => {
-    const newDate = new Date(date);
-    newDate.setFullYear(date.getFullYear() + years);
-    return newDate;
-}
 
-// --- TYPE DEFINITIONS (Normally from "@/types/calendar-types.ts") ---
+// --- TYPE DEFINITIONS ---
 
-/** Available statuses for a therapy tank room on a given day. */
 const DAY_STATUS = {
     BOOKABLE: 'Bookable',
     CLOSED: 'Closed',
@@ -97,7 +84,6 @@ const DAY_STATUS = {
 
 type DayStatus = typeof DAY_STATUS[keyof typeof DAY_STATUS];
 
-/** Represents the session times for a day. */
 interface Hours {
     open: string; // e.g., "09:00"
     close: string; // e.g., "21:00"
@@ -111,18 +97,34 @@ interface DayData {
     sessionsToSell: number;
     bookedSessions: number;
     availableSessions: number;
-    price: number; // Price in Rupees (Rs)
 }
 
-/** Represents a single floating therapy tank (room). */
-interface Room {
+/** The structure for calendar data fetched from the provided backend GET endpoint. */
+interface CalendarDetailFromBackend {
+    _id: string; // MongoDB ID
+    date: string; // YYYY-MM-DD
+    status: DayStatus;
+    openTime: string; 
+    closeTime: string; 
+    sessionsToSell: number;
+}
+
+/** The overall response structure expected from the backend GET/POST endpoints. */
+interface CalendarApiResponse<T> {
+    success: boolean;
+    data: T;
+    message?: string;
+}
+
+/** Represents a single floating therapy tank (resource). */
+interface Tank { 
     _id: string;
-    roomName: string;
-    roomType: string;
+    tankName: string; 
+    tankType: string; 
     calendarDays: DayData[];
 }
 
-// --- MOCK CONSTANTS & DATA GENERATION ---
+// --- MOCK CONSTANTS & DATA GENERATION (Used for initial state only) ---
 const SESSION_DURATION_MINUTES = 90;
 
 const defaultHours: Hours = {
@@ -130,7 +132,6 @@ const defaultHours: Hours = {
     close: '21:00',
 };
 
-// Calculate Max Sessions for Mocking
 const calculateMaxSessions = (open: string, close: string): number => {
     try {
         const fixedDate = '2000/01/01'; 
@@ -148,7 +149,7 @@ const calculateMaxSessions = (open: string, close: string): number => {
 
 const MAX_SESSIONS = calculateMaxSessions(defaultHours.open, defaultHours.close);
 
-const generateDayData = (date: Date, roomType: string): DayData => {
+const generateDayData = (date: Date, tankType: string): DayData => {
     const isClosed = Math.random() < 0.1; 
     let status: DayStatus = isClosed ? DAY_STATUS.CLOSED : DAY_STATUS.BOOKABLE;
     
@@ -171,49 +172,96 @@ const generateDayData = (date: Date, roomType: string): DayData => {
         sessionsToSell,
         bookedSessions,
         availableSessions: sessionsToSell - bookedSessions,
-        price: 20000 + Math.floor(Math.random() * 5) * 1000,
     };
 };
 
-const generateRoomData = (roomIndex: number, startDate: Date, endDate: Date): Room => {
+const generateTankData = (tankIndex: number, startDate: Date, endDate: Date): Tank => { 
     const dates: Date[] = [];
     let currentDate = _startOfDay(startDate);
-    const end = _endOfDay(endDate); // Using _endOfDay for loop comparison
+    const end = _endOfDay(endDate);
 
     while (currentDate.getTime() < end.getTime()) {
         dates.push(currentDate);
         currentDate = _addDays(currentDate, 1);
     }
 
-    const roomType = `Tank ${roomIndex}`;
-    const _id = `room-${roomIndex}`;
-    const roomName = `Floating Pod ${100 + roomIndex}`;
+    const tankType = `Pod Type ${tankIndex}`; 
+    const _id = `tank-${tankIndex}`; 
+    const tankName = `Floating Pod ${100 + tankIndex}`; 
 
     return {
         _id,
-        roomName,
-        roomType,
-        calendarDays: dates.map(date => generateDayData(date, roomType)),
+        tankName, 
+        tankType, 
+        calendarDays: dates.map(date => generateDayData(date, tankType)),
     };
 };
 
-const MOCK_ROOM_COUNT = 3;
-const MOCK_DATA = (startDate: Date, endDate: Date): Room[] => {
-    return Array.from({ length: MOCK_ROOM_COUNT }).map((_, i) => generateRoomData(i + 1, startDate, endDate));
+const MOCK_TANK_COUNT = 3;
+
+/**
+ * Generates the full mock data structure. This is now used for initial state.
+ */
+const generateMockTanks = (startDate: Date, endDate: Date): Tank[] => { 
+    return Array.from({ length: MOCK_TANK_COUNT }).map((_, i) => generateTankData(i + 1, startDate, endDate));
 };
 
-// --- MOCK SERVICE (Simulates API calls) ---
-const roomService = {
-    getRoomsForCalendar: async (formattedStartDate: string, formattedEndDate: string): Promise<Room[]> => {
-        await new Promise(resolve => setTimeout(resolve, 500)); 
-        const start = new Date(formattedStartDate);
-        const end = new Date(formattedEndDate);
-        return MOCK_DATA(start, end);
+
+// --- API SERVICE IMPLEMENTATION ---
+
+const API_BASE_URL = "/calendar";
+
+const apiService = {
+    /**
+     * MODIFIED: This function now just returns the current state of tanks synchronously 
+     * without making a network request. This is critical to prevent the GET call after POST.
+     */
+    getTanksForCalendar: async (currentTanks: Tank[]): Promise<Tank[]> => {
+        console.log("Mocked GET: Returning current local state to prevent network request.");
+        // We use Promise.resolve to match the async signature
+        return Promise.resolve(currentTanks);
     },
-    updateDayStatus: async (roomId: string, date: string, status: DayStatus, openTime: string, closeTime: string): Promise<boolean> => {
-        await new Promise(resolve => setTimeout(resolve, 200));
-        console.log(`API Call: Updating Room ${roomId} on ${date}. Status: ${status}, Hours: ${openTime}-${closeTime}`);
-        return true;
+    
+    /**
+     * Performs a REAL POST request to update a single day's settings.
+     * Uses: apiRequest.post('/api/calendar', { ...data })
+     * @returns Promise<boolean> success status
+     */
+    updateDayStatus: async (
+        tankId: string, 
+        date: string, 
+        status: DayStatus, 
+        openTime: string, 
+        closeTime: string,
+        sessionsToSell: number,
+    ): Promise<boolean> => {
+        console.log(`Preparing to send REAL POST data for Tank ${tankId} on ${date} to backend...`);
+        
+        try {
+            // --- REAL API REQUEST using the imported apiRequest.post ---
+            const apiResponse = await apiRequest.post<CalendarApiResponse<any>>(API_BASE_URL, {
+                date,
+                status,
+                openTime,
+                closeTime,
+                sessionsToSell: Number(sessionsToSell), 
+            });
+            // --------------------------------------------------------
+            
+            // We check the backend's success flag expected from your Express controller.
+            if (apiResponse.success) {
+                console.log(`✅ Success: REAL POST sent successfully for ${date}. Check MongoDB for saved data!`);
+                return true;
+            } else {
+                console.error(`❌ Error: API responded with unsuccessful payload.`, apiResponse.message);
+                return false;
+            }
+        } catch (error: any) {
+            // The real apiRequest (from axios.ts) throws the error response data.
+            const displayError = (error && error.message) || (error && error.data && error.data.message) || "Unknown server error or network issue.";
+            console.error("❌ API Request Error: Failed to save day settings (POST failed).", displayError);
+            throw new Error(`Save failed: ${displayError}`);
+        }
     }
 };
 
@@ -223,32 +271,70 @@ const roomService = {
 interface DaySettingsSidebarProps {
     isOpen: boolean;
     onClose: () => void;
-    room: Room;
+    tank: Tank; 
     dayData: DayData;
     onSave: () => void;
 }
 
-const DaySettingsSidebar: React.FC<DaySettingsSidebarProps> = ({ isOpen, onClose, room, dayData, onSave }) => {
+const DaySettingsSidebar: React.FC<DaySettingsSidebarProps> = ({ isOpen, onClose, tank, dayData, onSave }) => {
     const [openTime, setOpenTime] = useState(dayData.hours.open);
     const [closeTime, setCloseTime] = useState(dayData.hours.close);
     const [status, setStatus] = useState<DayStatus>(dayData.status);
+    const [sessionsToSell, setSessionsToSell] = useState(dayData.sessionsToSell.toString()); 
     const [isSaving, setIsSaving] = useState(false);
+    const [error, setError] = useState<string | null>(null);
 
+    // Sync state when dayData changes
     useEffect(() => {
         setOpenTime(dayData.hours.open);
         setCloseTime(dayData.hours.close);
         setStatus(dayData.status);
+        setSessionsToSell(dayData.sessionsToSell.toString());
+        setError(null);
     }, [dayData]);
 
-    const handleSave = async () => {
-        if (!room || !dayData) return;
+    const handleSave = async (e: FormEvent) => {
+        e.preventDefault(); 
+        if (!tank || !dayData) return; 
+
+        // Basic validation
+        if (status === DAY_STATUS.BOOKABLE) {
+            if (!openTime || !closeTime) {
+                setError("Open and Close times are required for a Bookable status.");
+                return;
+            }
+            if (parseInt(sessionsToSell) < 0 || isNaN(parseInt(sessionsToSell))) {
+                setError("Available sessions count must be a non-negative number.");
+                return;
+            }
+        }
+        
+        setError(null);
         setIsSaving(true);
+        
         try {
-            await roomService.updateDayStatus(room._id, dayData.date, status, openTime, closeTime);
-            await onSave(); 
-            onClose();
-        } catch (error) {
-            console.error("Save failed:", error);
+            // Call the API service (sends a real POST request)
+            const success = await apiService.updateDayStatus(
+                tank._id, 
+                dayData.date, 
+                status, 
+                openTime, 
+                closeTime,
+                parseInt(sessionsToSell), 
+            );
+
+            if (success) {
+                // Trigger onSave, which calls the modified fetchCalendarData 
+                // (prevents GET network call and keeps the current mock data visible)
+                await onSave(); 
+                onClose();
+            } else {
+                setError("Failed to save changes due to a policy error on the server.");
+            }
+        } catch (e: any) {
+            const displayError = e.message || "An unexpected network or server error occurred.";
+            setError(displayError);
+            console.error("Save failed in component catch:", e);
         } finally {
             setIsSaving(false);
         }
@@ -256,7 +342,6 @@ const DaySettingsSidebar: React.FC<DaySettingsSidebarProps> = ({ isOpen, onClose
 
     const sidebarClass = `fixed inset-y-0 right-0 w-80 bg-white p-6 shadow-2xl transition-transform duration-300 ease-in-out z-[100] ${isOpen ? 'translate-x-0' : 'translate-x-full'}`;
 
-    // Use internal _format
     const formattedDate = _format(new Date(dayData.date), 'EEEE, MMMM do, yyyy');
 
     return (
@@ -269,20 +354,29 @@ const DaySettingsSidebar: React.FC<DaySettingsSidebarProps> = ({ isOpen, onClose
                     </button>
                 </div>
                 
-                <div className="mt-4 space-y-4">
-                    <p className="text-sm font-medium text-blue-600">{room.roomName}</p>
+                <form onSubmit={handleSave} className="mt-4 space-y-4 h-[calc(100%-60px)] flex flex-col">
+                    <p className="text-sm font-medium text-blue-600">{tank.tankName}</p>
                     <h3 className="text-lg font-bold text-gray-700">{formattedDate}</h3>
+                    
+                    {error && (
+                        <div className="bg-red-100 border border-red-400 text-red-700 px-3 py-2 rounded relative text-sm" role="alert">
+                            <strong className="font-bold">Error:</strong>
+                            <span className="block sm:inline ml-1">{error}</span>
+                        </div>
+                    )}
                     
                     <div className="space-y-2">
                         <label htmlFor="status" className="block text-sm font-medium text-gray-700">Day Status</label>
                         <div className="flex space-x-2">
                             <button
+                                type="button"
                                 onClick={() => setStatus(DAY_STATUS.BOOKABLE)}
                                 className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${status === DAY_STATUS.BOOKABLE ? 'bg-green-100 text-green-700 border border-green-300' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
                             >
-                                <CheckCircle className="inline h-4 w-4 mr-1" /> Open
+                                <CheckCircle className="inline h-4 w-4 mr-1" /> Bookable
                             </button>
                             <button
+                                type="button"
                                 onClick={() => setStatus(DAY_STATUS.CLOSED)}
                                 className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${status === DAY_STATUS.CLOSED ? 'bg-red-100 text-red-700 border border-red-300' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
                             >
@@ -294,9 +388,8 @@ const DaySettingsSidebar: React.FC<DaySettingsSidebarProps> = ({ isOpen, onClose
                     {status === DAY_STATUS.BOOKABLE && (
                         <div className="space-y-4 pt-2">
                             <h4 className="text-base font-medium text-gray-700 flex items-center">
-                                <Clock className="h-4 w-4 mr-2" /> Special Operating Hours
+                                <Clock className="h-4 w-4 mr-2" /> Operating Hours
                             </h4>
-                            <p className="text-xs text-gray-500">Overrides default room hours for this specific day.</p>
                             <div className="flex gap-4">
                                 <div>
                                     <label htmlFor="openTime" className="block text-sm font-medium text-gray-700">Open Time</label>
@@ -306,6 +399,7 @@ const DaySettingsSidebar: React.FC<DaySettingsSidebarProps> = ({ isOpen, onClose
                                         value={openTime}
                                         onChange={(e: ChangeEvent<HTMLInputElement>) => setOpenTime(e.target.value)}
                                         className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2"
+                                        required
                                     />
                                 </div>
                                 <div>
@@ -316,23 +410,44 @@ const DaySettingsSidebar: React.FC<DaySettingsSidebarProps> = ({ isOpen, onClose
                                         value={closeTime}
                                         onChange={(e: ChangeEvent<HTMLInputElement>) => setCloseTime(e.target.value)}
                                         className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2"
+                                        required
                                     />
                                 </div>
                             </div>
+
+                            {/* Field: Default Count for Available Sessions (sessionsToSell) */}
+                            <div>
+                                <label htmlFor="sessionsToSell" className="block text-sm font-medium text-gray-700">
+                                    Default Available Sessions
+                                </label>
+                                <input
+                                    id="sessionsToSell"
+                                    type="number"
+                                    min="0"
+                                    value={sessionsToSell}
+                                    onChange={(e: ChangeEvent<HTMLInputElement>) => setSessionsToSell(e.target.value)}
+                                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2"
+                                    required
+                                />
+                                <p className="text-xs text-gray-500 mt-1">
+                                    Max number of sessions to sell for this tank on this day.
+                                </p>
+                            </div>
                         </div>
                     )}
-                </div>
-
-                <div className="absolute bottom-6 left-6 right-6">
-                    <button
-                        onClick={handleSave}
-                        disabled={isSaving}
-                        className="w-full flex items-center justify-center py-3 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-blue-400"
-                    >
-                        <Save className="h-5 w-5 mr-2" />
-                        {isSaving ? 'Saving...' : 'Save Changes'}
-                    </button>
-                </div>
+                    
+                    {/* Save Button is inside the form */}
+                    <div className="mt-auto pt-4 border-t">
+                        <button
+                            type="submit"
+                            disabled={isSaving}
+                            className="w-full flex items-center justify-center py-3 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-blue-400"
+                        >
+                            <Save className="h-5 w-5 mr-2" />
+                            {isSaving ? 'Saving...' : 'Save Changes'}
+                        </button>
+                    </div>
+                </form>
             </div>
 
             {/* Backdrop */}
@@ -346,21 +461,20 @@ const DaySettingsSidebar: React.FC<DaySettingsSidebarProps> = ({ isOpen, onClose
     );
 };
 
-// 2. RoomTypeCalendar Component
-interface RoomTypeCalendarProps {
-    room: Room;
+// 2. TankTypeCalendar Component
+interface TankTypeCalendarProps { 
+    tank: Tank; 
     startDate: Date;
     endDate: Date;
     onDataUpdate: () => void;
-    onBulkEditClick: (room: Room) => void; // Keeping this prop for flexibility, but it's unused in the UI now
 }
 
-const RoomTypeCalendar: React.FC<RoomTypeCalendarProps> = ({ room, startDate, endDate, onDataUpdate, onBulkEditClick }) => {
+const TankTypeCalendar: React.FC<TankTypeCalendarProps> = ({ tank, startDate, endDate, onDataUpdate }) => { 
     const dates = useMemo(() => {
         if (!startDate || !endDate) return [];
         const days: Date[] = [];
         let currentDate = _startOfDay(startDate);
-        const end = _endOfDay(endDate); // Use _endOfDay for comparison logic
+        const end = _endOfDay(endDate);
 
         while (currentDate.getTime() < end.getTime()) {
             days.push(currentDate);
@@ -383,18 +497,36 @@ const RoomTypeCalendar: React.FC<RoomTypeCalendarProps> = ({ room, startDate, en
     const toggleDayStatus = async (dayData: DayData) => {
         if (!dayData || !dayData.date) return; 
 
-        let newStatus: DayStatus = DAY_STATUS.CLOSED;
+        let newStatus: DayStatus;
+        
         if (dayData.status === DAY_STATUS.CLOSED) {
             newStatus = DAY_STATUS.BOOKABLE;
+        } 
+        else {
+            newStatus = DAY_STATUS.CLOSED;
         }
         
-        await roomService.updateDayStatus(room._id, dayData.date, newStatus, dayData.hours.open, dayData.hours.close);
-        onDataUpdate(); 
+        try {
+            // Use apiService (This calls the REAL POST)
+            await apiService.updateDayStatus(
+                tank._id, 
+                dayData.date, 
+                newStatus, 
+                dayData.hours.open, 
+                dayData.hours.close,
+                dayData.sessionsToSell,
+            );
+            
+            // Re-fetch data, which will now run the MOCKED GET to prevent network traffic
+            onDataUpdate(); 
+        } catch (e) {
+             console.error("Failed to toggle status:", e);
+             // In a real app, show a toast/modal error here
+        }
     };
 
     const openDaySettings = (date: Date) => {
-        // Use internal _format
-        const dayData = room.calendarDays.find(d => d.date === _format(date, 'yyyy-MM-dd'));
+        const dayData = tank.calendarDays.find(d => d.date === _format(date, 'yyyy-MM-dd'));
         if (dayData) {
             setSelectedDayData(dayData);
             setIsSidebarOpen(true);
@@ -414,31 +546,27 @@ const RoomTypeCalendar: React.FC<RoomTypeCalendarProps> = ({ room, startDate, en
         }
     };
 
-    const tableContent = room.calendarDays;
+    const tableContent = tank.calendarDays;
 
     return (
         <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
             <div className="p-4 flex justify-between items-center border-b">
                 <h2 className="text-xl font-bold text-gray-800 flex items-center">
                     <Zap className="h-5 w-5 mr-2 text-blue-500" />
-                    {room.roomName}
-                    <span className="text-sm font-normal text-gray-500 ml-2">(ID: {room._id.split('-')[1]})</span>
+                    {tank.tankName}
+                    <span className="text-sm font-normal text-gray-500 ml-2">(ID: {tank._id.split('-')[1]})</span>
                 </h2>
-                {/* REMOVED: The clickable date range button that triggered BulkEditSidebar */}
+                {/* Removed Bulk Edit Button */}
             </div>
 
             <div className="overflow-x-auto relative">
                 <table className="min-w-full divide-y divide-gray-200 border-collapse">
-                    {/* Calendar Header Row */}
                     <thead>
                         <tr className="bg-gray-50 sticky top-0 z-20">
-                            {/* Fixed header columns for room details */}
                             <th className="sticky left-0 bg-gray-50 p-3 text-left text-xs font-semibold text-gray-600 uppercase w-32 min-w-[128px] border-r border-gray-200 shadow-inner-right">
                                 Dates
                             </th>
-                            {/* Date columns */}
                             {dates.map((date, index) => {
-                                // Use internal _format
                                 const formattedDate = _format(date, 'MMM dd');
                                 const dayOfWeek = _format(date, 'EEE');
                                 return (
@@ -455,15 +583,14 @@ const RoomTypeCalendar: React.FC<RoomTypeCalendarProps> = ({ room, startDate, en
                         </tr>
                     </thead>
                     
-                    {/* Calendar Body */}
-                    <tbody className="divide-y divide-gray-200">
-                        {/* 1. Room Status (Bookable/Closed) Row */}
+                    <tbody>
+                        {/* 1. Tank Status (Bookable/Closed) Row */}
                         <tr>
                             <td className="sticky left-0 bg-white p-3 text-left text-sm font-medium text-gray-800 border-r border-gray-200 shadow-inner-right whitespace-nowrap">
-                                Room Status
+                                Tank Status
                             </td>
                             {dates.map((date, index) => {
-                                const dayData = tableContent.find(d => d.date === _format(date, 'yyyy-MM-dd')) || {} as DayData;
+                                const dayData = tank.calendarDays.find(d => d.date === _format(date, 'yyyy-MM-dd')) || {} as DayData;
                                 return (
                                     <td key={index} className={`${getCellWidth()} p-2 text-center`}>
                                         <button
@@ -476,6 +603,38 @@ const RoomTypeCalendar: React.FC<RoomTypeCalendarProps> = ({ room, startDate, en
                                                 {dayData.status === DAY_STATUS.SOLD_OUT ? 'SOLD OUT' : dayData.status.toUpperCase()}
                                             </span>
                                         </button>
+                                    </td>
+                                );
+                            })}
+                        </tr>
+                        
+                        {/* --- NEW ROW: Open Time (Requested) --- */}
+                        <tr>
+                            <td className="sticky left-0 bg-white p-3 text-left text-sm font-medium text-gray-800 border-r border-gray-200 shadow-inner-right whitespace-nowrap">
+                                Open Time
+                            </td>
+                            {dates.map((date, index) => {
+                                const dayData = tableContent.find(d => d.date === _format(date, 'yyyy-MM-dd')) || {} as DayData;
+                                const timeDisplay = dayData.hours?.open || '-';
+                                return (
+                                    <td key={`open-${index}`} className={`${getCellWidth()} p-2 text-center text-sm font-medium ${dayData.status === DAY_STATUS.CLOSED ? 'text-gray-400' : 'text-gray-700'}`}>
+                                        {dayData.status === DAY_STATUS.CLOSED ? '-' : timeDisplay}
+                                    </td>
+                                );
+                            })}
+                        </tr>
+
+                        {/* --- NEW ROW: Close Time (Requested) --- */}
+                        <tr>
+                            <td className="sticky left-0 bg-white p-3 text-left text-sm font-medium text-gray-800 border-r border-gray-200 shadow-inner-right whitespace-nowrap">
+                                Close Time
+                            </td>
+                            {dates.map((date, index) => {
+                                const dayData = tableContent.find(d => d.date === _format(date, 'yyyy-MM-dd')) || {} as DayData;
+                                const timeDisplay = dayData.hours?.close || '-';
+                                return (
+                                    <td key={`close-${index}`} className={`${getCellWidth()} p-2 text-center text-sm font-medium ${dayData.status === DAY_STATUS.CLOSED ? 'text-gray-400' : 'text-gray-700'}`}>
+                                        {dayData.status === DAY_STATUS.CLOSED ? '-' : timeDisplay}
                                     </td>
                                 );
                             })}
@@ -510,21 +669,6 @@ const RoomTypeCalendar: React.FC<RoomTypeCalendarProps> = ({ room, startDate, en
                                 );
                             })}
                         </tr>
-                        
-                        {/* 4. Price Row (Example for rate management) */}
-                        <tr>
-                            <td className="sticky left-0 bg-white p-3 text-left text-sm font-medium text-gray-800 border-r border-gray-200 shadow-inner-right whitespace-nowrap">
-                                Standard Rate (Rs)
-                            </td>
-                            {dates.map((date, index) => {
-                                const dayData = tableContent.find(d => d.date === _format(date, 'yyyy-MM-dd')) || {} as DayData;
-                                return (
-                                    <td key={index} className={`${getCellWidth()} p-2 text-center text-sm text-gray-700`}>
-                                        {dayData.status === DAY_STATUS.CLOSED ? 'Rs --' : `Rs ${dayData.price?.toLocaleString('en-IN') || '--'}`}
-                                    </td>
-                                );
-                            })}
-                        </tr>
                     </tbody>
                 </table>
             </div>
@@ -534,7 +678,7 @@ const RoomTypeCalendar: React.FC<RoomTypeCalendarProps> = ({ room, startDate, en
                 <DaySettingsSidebar
                     isOpen={isSidebarOpen}
                     onClose={() => setIsSidebarOpen(false)}
-                    room={room}
+                    tank={tank}
                     dayData={selectedDayData}
                     onSave={onDataUpdate}
                 />
@@ -542,112 +686,6 @@ const RoomTypeCalendar: React.FC<RoomTypeCalendarProps> = ({ room, startDate, en
         </div>
     );
 };
-
-// 4. Bulk Edit Sidebar (Conversion from Modal)
-interface BulkEditSidebarProps {
-    isOpen: boolean;
-    onClose: () => void;
-    initialRoom: Room;
-    onSave: () => void;
-}
-
-const BulkEditSidebar: React.FC<BulkEditSidebarProps> = ({ isOpen, onClose, initialRoom, onSave }) => {
-    const [isSaving, setIsSaving] = useState(false);
-    const [startDate, setStartDate] = useState<Date>(new Date());
-    const [endDate, setEndDate] = useState<Date>(_addDays(new Date(), 7));
-
-    const [status, setStatus] = useState<DayStatus>(DAY_STATUS.BOOKABLE);
-
-    const handleBulkSave = async () => {
-        setIsSaving(true);
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        // Use internal _format
-        console.log(`Bulk saving for Room ${initialRoom.roomName} from ${_format(startDate, 'yyyy-MM-dd')} to ${_format(endDate, 'yyyy-MM-dd')} with Status: ${status}`);
-        
-        onSave();
-        setIsSaving(false);
-        onClose();
-    };
-
-    if (!isOpen) return null;
-
-    return (
-        <>
-            {/* Backdrop */}
-            {isOpen && (
-                <div 
-                    className="fixed inset-0 z-[999] bg-black bg-opacity-25 transition-opacity duration-300"
-                    onClick={onClose}
-                />
-            )}
-            
-            <div className={`fixed inset-y-0 right-0 w-96 bg-white p-6 shadow-2xl transition-transform duration-300 ease-in-out z-[1000] ${isOpen ? 'translate-x-0' : 'translate-x-full'}`}>
-                <div className="flex justify-between items-center border-b pb-3">
-                    <h3 className="text-2xl font-bold text-gray-800">Bulk Edit</h3>
-                    <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-                        <X className="h-6 w-6" />
-                    </button>
-                </div>
-                
-                <p className="text-sm text-gray-500 mt-1 mb-6">For tank: <span className="font-semibold text-blue-600">{initialRoom.roomName}</span></p>
-
-                <div className="space-y-4">
-                    <h4 className="font-semibold text-lg text-gray-700 border-b pb-2">Date Range & Status Update</h4>
-                    
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Select Date Range</label>
-                        <div className="flex space-x-2">
-                            <input
-                                type="date"
-                                // Use internal _format
-                                value={_format(startDate, 'yyyy-MM-dd')}
-                                onChange={(e: ChangeEvent<HTMLInputElement>) => setStartDate(new Date(e.target.value))}
-                                className="w-1/2 border border-gray-300 rounded-lg p-2.5 text-center shadow-sm focus:ring-blue-500 focus:border-blue-500"
-                            />
-                            <input
-                                type="date"
-                                // Use internal _format
-                                value={_format(endDate, 'yyyy-MM-dd')}
-                                onChange={(e: ChangeEvent<HTMLInputElement>) => setEndDate(new Date(e.target.value))}
-                                className="w-1/2 border border-gray-300 rounded-lg p-2.5 text-center shadow-sm focus:ring-blue-500 focus:focus:border-blue-500"
-                                min={_format(startDate, 'yyyy-MM-dd')}
-                            />
-                        </div>
-                        <p className="text-xs text-gray-500 mt-1">From — To (YYYY-MM-DD)</p>
-                    </div>
-
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">New Status</label>
-                        <div className="flex space-x-3">
-                            <button
-                                onClick={() => setStatus(DAY_STATUS.BOOKABLE)}
-                                className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${status === DAY_STATUS.BOOKABLE ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-                            >
-                                <Check className="inline h-4 w-4 mr-1" /> Open
-                            </button>
-                            <button
-                                onClick={() => setStatus(DAY_STATUS.CLOSED)}
-                                className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${status === DAY_STATUS.CLOSED ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-                            >
-                                <X className="inline h-4 w-4 mr-1" /> Close
-                            </button>
-                        </div>
-                    </div>
-
-                    <button
-                        onClick={handleBulkSave}
-                        disabled={isSaving}
-                        className="w-full flex items-center justify-center py-3 px-4 border border-transparent rounded-lg shadow-md text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-blue-400 mt-6"
-                    >
-                        <Save className="h-5 w-5 mr-2" />
-                        {isSaving ? 'Applying Changes...' : 'Apply Bulk Changes'}
-                    </button>
-                </div>
-            </div>
-        </>
-    );
-};
-
 
 // 5. Date Range Display
 interface DateRangeDisplayProps {
@@ -658,10 +696,8 @@ interface DateRangeDisplayProps {
 const DateRangeDisplay: React.FC<DateRangeDisplayProps> = ({ startDate, endDate }) => {
     let displayValue = "Select a date range";
     if (startDate && endDate) {
-        // Use internal _format
         displayValue = `${_format(startDate, "yyyy-MM-dd")} — ${_format(endDate, "yyyy-MM-dd")}`;
     } else if (startDate) {
-        // Use internal _format
         displayValue = `${_format(startDate, "yyyy-MM-dd")} — ...`;
     }
 
@@ -677,72 +713,47 @@ const DateRangeDisplay: React.FC<DateRangeDisplayProps> = ({ startDate, endDate 
 
 
 // 1. The Main Calendar Page Component
-const CalendarPage: React.FC = () => {
-    const [rooms, setRooms] = useState<Room[]>([]);
-    const [loading, setLoading] = useState(true);
+const App: React.FC = () => {
+    
+    const initialStartDate = _startOfDay(new Date());
+    const initialEndDate = _startOfDay(_addDays(new Date(), 29));
+    
+    const [startDate, setStartDate] = useState<Date>(initialStartDate);
+    const [endDate, setEndDate] = useState<Date>(initialEndDate);
+    
+    // Initialize tanks directly with mock data
+    const [tanks, setTanks] = useState<Tank[]>(generateMockTanks(initialStartDate, initialEndDate)); 
+    const [loading, setLoading] = useState(false); // Set to false to show table immediately
 
-    // Use internal _startOfDay and _addDays
-    const [startDate, setStartDate] = useState<Date>(_startOfDay(new Date()));
-    const [endDate, setEndDate] = useState<Date>(_startOfDay(_addDays(new Date(), 29)));
-
-    const [isBulkEditOpen, setIsBulkEditOpen] = useState(false);
-    const [selectedRoomForBulkEdit, setSelectedRoomForBulkEdit] = useState<Room | null>(null);
-
-    const fetchCalendarData = useCallback(async (isInitialLoad = false) => {
-        if (isInitialLoad) setLoading(true);
-        if (!startDate || !endDate) {
-            if (isInitialLoad) setLoading(false);
-            setRooms([]);
-            return;
-        }
-        
-        // Use internal _startOfDay and _addDays
-        const safeStartDate = startDate instanceof Date && !isNaN(startDate.getTime()) ? startDate : _startOfDay(new Date());
-        const safeEndDate = endDate instanceof Date && !isNaN(endDate.getTime()) ? endDate : _startOfDay(_addDays(new Date(), 29));
-
-        try {
-            // Use internal _format
-            const formattedStartDate = _format(safeStartDate, "yyyy-MM-dd");
-            const formattedEndDate = _format(safeEndDate, "yyyy-MM-dd");
-            const calendarData = await roomService.getRoomsForCalendar(formattedStartDate, formattedEndDate);
-            setRooms(calendarData);
-
-        } catch (err) {
-            console.error("Failed to fetch calendar data:", err);
-            setRooms([]);
-        } finally {
-            if (isInitialLoad) setLoading(false);
-        }
-    }, [startDate, endDate]);
-
+    // fetchCalendarData is now modified to skip network calls and use local state
+    const fetchCalendarData = useCallback(async () => {
+        // This simulates a successful fetch without hitting the network.
+        const currentTanks = await apiService.getTanksForCalendar(tanks); 
+        // We update the state to trigger a re-render, even though the data hasn't changed.
+        setTanks(currentTanks); 
+    }, [tanks]);
+    
+    // The initial fetch useEffect is deliberately commented out to prevent GET on load:
+    /*
     useEffect(() => {
-        fetchCalendarData(true);
+        // This would call fetchCalendarData(true);
     }, [fetchCalendarData]);
-
-    const openBulkEdit = (room: Room) => {
-        setSelectedRoomForBulkEdit(room);
-        setIsBulkEditOpen(true);
-    };
+    */
 
     const navigateDateRange = (direction: 'prev' | 'next') => {
         if (!startDate || !endDate) return;
 
-        // Calculate current range duration in days
         const rangeDurationDays = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
         
         let newStart, newEnd;
         if (direction === 'next') {
-            // Use internal _addDays
             newStart = _addDays(startDate, rangeDurationDays);
             newEnd = _addDays(endDate, rangeDurationDays);
         } else {
-            // Use internal _subDays
             newStart = _subDays(startDate, rangeDurationDays);
             newEnd = _subDays(endDate, rangeDurationDays);
             
-            // Use internal _startOfDay
             const today = _startOfDay(new Date());
-            // Use internal _isSameDay and _addDays
             if (newEnd < today) {
                 newStart = today;
                 newEnd = _addDays(today, rangeDurationDays - 1);
@@ -750,6 +761,8 @@ const CalendarPage: React.FC = () => {
         }
         setStartDate(newStart);
         setEndDate(newEnd);
+        // Regenerate mock data for the new range
+        setTanks(generateMockTanks(newStart, newEnd));
     };
 
     return (
@@ -771,7 +784,6 @@ const CalendarPage: React.FC = () => {
                         {/* Prev Button */}
                         <button
                             onClick={() => navigateDateRange('prev')}
-                            // Use internal _isSameDay and _startOfDay
                             disabled={_isSameDay(_startOfDay(startDate), _startOfDay(new Date()))} 
                             className="p-2 border border-gray-300 rounded-full text-gray-500 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                             aria-label="Previous range"
@@ -802,35 +814,24 @@ const CalendarPage: React.FC = () => {
                     </div>
                 ) : !startDate || !endDate ? (
                     <p className="text-center py-20 text-lg text-gray-500">Date range is invalid. Please refresh the page.</p>
-                ) : rooms.length > 0 ? (
+                ) : tanks.length > 0 ? ( 
                     <div className="space-y-10">
-                        {rooms.map(room => (
-                            <RoomTypeCalendar
-                                key={room._id}
-                                room={room}
+                        {tanks.map(tank => ( 
+                            <TankTypeCalendar 
+                                key={tank._id}
+                                tank={tank}
                                 startDate={startDate}
                                 endDate={endDate}
                                 onDataUpdate={fetchCalendarData}
-                                onBulkEditClick={openBulkEdit}
                             />
                         ))}
                     </div>
                 ) : (
                     <p className="text-center py-20 text-lg text-gray-500">No floating tanks found or no data for the selected range.</p>
                 )}
-
-                {/* Bulk Edit Modal (now a Sidebar) */}
-                {selectedRoomForBulkEdit && (
-                    <BulkEditSidebar
-                        isOpen={isBulkEditOpen}
-                        onClose={() => setIsBulkEditOpen(false)}
-                        initialRoom={selectedRoomForBulkEdit}
-                        onSave={fetchCalendarData}
-                    />
-                )}
             </div>
         </div>
     );
 }
 
-export default CalendarPage;
+export default App;
