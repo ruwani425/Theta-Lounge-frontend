@@ -4,13 +4,9 @@ import { useEffect, useState, useCallback, useMemo, type ChangeEvent, type FormE
 import { Calendar as CalendarIcon, X, Check, Clock, Edit, Lock, Unlock, Zap, XCircle, CheckCircle, Save, ChevronLeft, ChevronRight } from 'lucide-react';
 
 // --- Import the actual apiRequest from axios.ts ---
-import apiRequest from "../../core/axios";
-
-// --- REMOVED MOCK IMPLEMENTATION ---
-// The actual apiRequest singleton is now used for POST.
+import apiRequest from "../../core/axios"; 
 
 // --- DATE UTILITY REPLACEMENTS (Keep as is) ---
-
 const _format = (date: Date, fmt: string): string => {
     const year = date.getFullYear();
     const month = date.getMonth() + 1;
@@ -97,11 +93,13 @@ interface DayData {
     sessionsToSell: number;
     bookedSessions: number;
     availableSessions: number;
+    sessionDuration: number; 
 }
 
 /** The structure for calendar data fetched from the provided backend GET endpoint. */
 interface CalendarDetailFromBackend {
     _id: string; // MongoDB ID
+    tankId: string; // MongoDB Tank ID
     date: string; // YYYY-MM-DD
     status: DayStatus;
     openTime: string; 
@@ -116,66 +114,113 @@ interface CalendarApiResponse<T> {
     message?: string;
 }
 
-/** Represents a single floating therapy tank (resource). */
+// NEW: Fetched from /api/system-settings
+interface SystemSettings {
+  defaultFloatPrice: number;
+  cleaningBuffer: number;
+  sessionsPerDay: number;
+  openTime: string; // Used for default hours
+  closeTime: string; // Used for default hours
+}
+
+// --- NEW TYPE: Reflects the MongoDB Tank Model for fetching ---
+interface BackendTank {
+    _id: string;
+    name: string; // Used as tankName/tankType
+    capacity: number;
+    sessionDuration: number; // Duration in minutes
+}
+
+
+/** Represents a single floating therapy tank (resource) prepared for the calendar. */
 interface Tank { 
     _id: string;
     tankName: string; 
     tankType: string; 
+    sessionDuration: number; 
     calendarDays: DayData[];
 }
 
-// --- MOCK CONSTANTS & DATA GENERATION (Used for initial state only) ---
-const SESSION_DURATION_MINUTES = 90;
+// --- SESSION CALCULATION UTILITY ---
 
-const defaultHours: Hours = {
-    open: '09:00',
-    close: '21:00',
-};
+const BREAK_DURATION_MINUTES = 30; // 30 minute break
+const TOTAL_CYCLE_MINUTES = (sessionDuration: number) => sessionDuration + BREAK_DURATION_MINUTES;
 
-const calculateMaxSessions = (open: string, close: string): number => {
+/**
+ * Calculates the maximum number of full sessions based on dynamic session duration.
+ * The calculation now uses the actual duration from the tank data.
+ * @param openTime Time string (HH:mm)
+ * @param closeTime Time string (HH:mm)
+ * @param sessionDuration The duration of one session in minutes (e.g., 90)
+ * @returns The count of full sessions.
+ */
+const calculateSessionCount = (openTime: string, closeTime: string, sessionDuration: number): number => {
+    if (sessionDuration <= 0) return 0;
+    const cycleTime = TOTAL_CYCLE_MINUTES(sessionDuration);
+
     try {
         const fixedDate = '2000/01/01'; 
-        const startTime = new Date(`${fixedDate} ${open}`).getTime();
-        const endTime = new Date(`${fixedDate} ${close}`).getTime();
-        if (endTime <= startTime) return 0;
-        return Math.floor(
-            (endTime - startTime) /
-            (SESSION_DURATION_MINUTES * 60 * 1000)
-        );
-    } catch {
+        const open = new Date(`${fixedDate} ${openTime}`);
+        const close = new Date(`${fixedDate} ${closeTime}`);
+
+        if (close.getTime() <= open.getTime()) {
+             return 0; 
+        }
+
+        const durationMinutes = (close.getTime() - open.getTime()) / (60 * 1000);
+        
+        // Calculate number of full cycles
+        const totalSessions = Math.floor(durationMinutes / cycleTime);
+        
+        return totalSessions;
+
+    } catch (e) {
         return 0;
     }
 }
 
-const MAX_SESSIONS = calculateMaxSessions(defaultHours.open, defaultHours.close);
 
-const generateDayData = (date: Date, tankType: string): DayData => {
-    const isClosed = Math.random() < 0.1; 
-    let status: DayStatus = isClosed ? DAY_STATUS.CLOSED : DAY_STATUS.BOOKABLE;
+// --- BASE DATA DEFAULTS (FALLBACK) ---
+
+// Fallback defaults if API fails
+const GLOBAL_DEFAULTS: SystemSettings = {
+    defaultFloatPrice: 0,
+    cleaningBuffer: 30,
+    sessionsPerDay: 8,
+    openTime: '09:00', 
+    closeTime: '21:00' 
+};
+
+
+const generateDayData = (date: Date, tank: BackendTank, settings: SystemSettings): DayData => {
+    // Use System Settings for default hours
+    const openTime = settings.openTime;
+    const closeTime = settings.closeTime;
     
-    let sessionsToSell = MAX_SESSIONS;
-    let bookedSessions = 0;
+    // Calculate sessions based on settings and tank duration
+    const sessionsAvailable = calculateSessionCount(openTime, closeTime, tank.sessionDuration);
+    
+    // Default status and booking data (will be overridden by fetched CalendarDetail)
+    let sessionsToSell = sessionsAvailable; 
+    let bookedSessions = Math.floor(Math.random() * (sessionsAvailable * 0.5)); // Simulate some bookings
 
-    if (!isClosed) {
-        sessionsToSell = Math.floor(MAX_SESSIONS * (0.8 + Math.random() * 0.2)); 
-        bookedSessions = Math.floor(Math.random() * sessionsToSell);
-        if (bookedSessions >= sessionsToSell) {
-            sessionsToSell = bookedSessions; 
-            status = DAY_STATUS.SOLD_OUT;
-        }
-    }
-
+    let status: DayStatus = sessionsToSell > bookedSessions ? DAY_STATUS.BOOKABLE : DAY_STATUS.SOLD_OUT;
+    
     return {
         date: _format(date, 'yyyy-MM-dd'),
         status: status,
-        hours: defaultHours,
+        hours: { open: openTime, close: closeTime },
         sessionsToSell,
         bookedSessions,
         availableSessions: sessionsToSell - bookedSessions,
+        sessionDuration: tank.sessionDuration,
     };
 };
 
-const generateTankData = (tankIndex: number, startDate: Date, endDate: Date): Tank => { 
+/**
+ * Creates the calendar structure using data from a fetched BackendTank and System Settings.
+ */
+const generateCalendarTank = (backendTank: BackendTank, startDate: Date, endDate: Date, settings: SystemSettings): Tank => { 
     const dates: Date[] = [];
     let currentDate = _startOfDay(startDate);
     const end = _endOfDay(endDate);
@@ -184,48 +229,95 @@ const generateTankData = (tankIndex: number, startDate: Date, endDate: Date): Ta
         dates.push(currentDate);
         currentDate = _addDays(currentDate, 1);
     }
-
-    const tankType = `Pod Type ${tankIndex}`; 
-    const _id = `tank-${tankIndex}`; 
-    const tankName = `Floating Pod ${100 + tankIndex}`; 
-
+    
     return {
-        _id,
-        tankName, 
-        tankType, 
-        calendarDays: dates.map(date => generateDayData(date, tankType)),
+        _id: backendTank._id,
+        tankName: backendTank.name, 
+        tankType: backendTank.name,
+        sessionDuration: backendTank.sessionDuration,
+        calendarDays: dates.map(date => generateDayData(date, backendTank, settings)),
     };
-};
-
-const MOCK_TANK_COUNT = 3;
-
-/**
- * Generates the full mock data structure. This is now used for initial state.
- */
-const generateMockTanks = (startDate: Date, endDate: Date): Tank[] => { 
-    return Array.from({ length: MOCK_TANK_COUNT }).map((_, i) => generateTankData(i + 1, startDate, endDate));
 };
 
 
 // --- API SERVICE IMPLEMENTATION ---
 
-const API_BASE_URL = "/calendar";
+const CALENDAR_API_BASE_URL = "/calendar"; // Consistent with app.ts for robust GET/POST
+const TANK_API_BASE_URL = "/tanks"; // Retaining user-defined path for tanks
+const SETTINGS_API_BASE_URL = "/system-settings"; // Correct path based on app.ts
 
 const apiService = {
     /**
-     * MODIFIED: This function now just returns the current state of tanks synchronously 
-     * without making a network request. This is critical to prevent the GET call after POST.
+     * Fetches system settings (global defaults).
      */
-    getTanksForCalendar: async (currentTanks: Tank[]): Promise<Tank[]> => {
-        console.log("Mocked GET: Returning current local state to prevent network request.");
-        // We use Promise.resolve to match the async signature
-        return Promise.resolve(currentTanks);
+    getSystemSettings: async (): Promise<SystemSettings> => {
+        try {
+            // Path: /api/system-settings
+            const settings = await apiRequest.get<SystemSettings>(SETTINGS_API_BASE_URL); 
+            console.log("✅ Success: Fetched system settings.");
+            
+            // Return fetched settings, merging with global defaults in case of missing fields
+            return { ...GLOBAL_DEFAULTS, ...settings };
+        } catch (error) {
+            console.error("❌ Failed to fetch system settings. Using fallback defaults.", error);
+            return GLOBAL_DEFAULTS; // Return robust fallback
+        }
+    },
+
+    /**
+     * Fetches the list of all tanks from the backend.
+     */
+    getTanks: async (): Promise<BackendTank[]> => {
+        try {
+            // Uses apiRequest.get('/tanks')
+            const tanks = await apiRequest.get<BackendTank[]>(TANK_API_BASE_URL); 
+            console.log(`✅ Success: Fetched ${tanks.length} tanks from backend via ${TANK_API_BASE_URL}.`);
+
+            // If the backend returns an empty array, provide a mock tank for display
+            if (!tanks || tanks.length === 0) {
+                 return [{ 
+                    _id: "mock-tank-1", 
+                    name: "Default Float Pod", 
+                    capacity: 1, 
+                    sessionDuration: 90 
+                }];
+            }
+            return tanks;
+        } catch (error) {
+            console.error(`❌ API Request Error: Failed to fetch tanks from ${TANK_API_BASE_URL}.`, error);
+            // Return a mock tank on failure to keep the app runnable
+            return [{ 
+                _id: "error-tank-1", 
+                name: "Fallback Float Pod", 
+                capacity: 1, 
+                sessionDuration: 90 
+            }];
+        }
     },
     
     /**
+     * Fetches existing calendar details (overrides) for a date range.
+     */
+    getCalendarOverrides: async (formattedStartDate: string, formattedEndDate: string): Promise<CalendarDetailFromBackend[]> => {
+        try {
+            // Using /api/calendar as per app.ts 
+            const apiResponse = await apiRequest.get<CalendarApiResponse<CalendarDetailFromBackend[]>>(CALENDAR_API_BASE_URL, {
+                params: { startDate: formattedStartDate, endDate: formattedEndDate }
+            });
+
+            if (apiResponse.success) {
+                console.log(`✅ Success: Fetched ${apiResponse.data.length} calendar overrides.`);
+                return apiResponse.data;
+            }
+            return [];
+        } catch (error) {
+            console.error("❌ Failed to fetch calendar overrides.", error);
+            return [];
+        }
+    },
+
+    /**
      * Performs a REAL POST request to update a single day's settings.
-     * Uses: apiRequest.post('/api/calendar', { ...data })
-     * @returns Promise<boolean> success status
      */
     updateDayStatus: async (
         tankId: string, 
@@ -235,29 +327,23 @@ const apiService = {
         closeTime: string,
         sessionsToSell: number,
     ): Promise<boolean> => {
-        console.log(`Preparing to send REAL POST data for Tank ${tankId} on ${date} to backend...`);
-        
         try {
-            // --- REAL API REQUEST using the imported apiRequest.post ---
-            const apiResponse = await apiRequest.post<CalendarApiResponse<any>>(API_BASE_URL, {
+            const apiResponse = await apiRequest.post<CalendarApiResponse<any>>(CALENDAR_API_BASE_URL, {
+                tankId, 
                 date,
                 status,
                 openTime,
                 closeTime,
                 sessionsToSell: Number(sessionsToSell), 
             });
-            // --------------------------------------------------------
             
-            // We check the backend's success flag expected from your Express controller.
             if (apiResponse.success) {
-                console.log(`✅ Success: REAL POST sent successfully for ${date}. Check MongoDB for saved data!`);
                 return true;
             } else {
                 console.error(`❌ Error: API responded with unsuccessful payload.`, apiResponse.message);
                 return false;
             }
         } catch (error: any) {
-            // The real apiRequest (from axios.ts) throws the error response data.
             const displayError = (error && error.message) || (error && error.data && error.data.message) || "Unknown server error or network issue.";
             console.error("❌ API Request Error: Failed to save day settings (POST failed).", displayError);
             throw new Error(`Save failed: ${displayError}`);
@@ -265,7 +351,7 @@ const apiService = {
     }
 };
 
-// --- UI COMPONENTS ---
+// --- UI COMPONENTS (Minimal changes required) ---
 
 // 3. Day Settings Sidebar
 interface DaySettingsSidebarProps {
@@ -280,16 +366,18 @@ const DaySettingsSidebar: React.FC<DaySettingsSidebarProps> = ({ isOpen, onClose
     const [openTime, setOpenTime] = useState(dayData.hours.open);
     const [closeTime, setCloseTime] = useState(dayData.hours.close);
     const [status, setStatus] = useState<DayStatus>(dayData.status);
-    const [sessionsToSell, setSessionsToSell] = useState(dayData.sessionsToSell.toString()); 
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    // Sync state when dayData changes
+    const calculatedSessions = useMemo(() => {
+        return calculateSessionCount(openTime, closeTime, dayData.sessionDuration);
+    }, [openTime, closeTime, dayData.sessionDuration]);
+
+
     useEffect(() => {
         setOpenTime(dayData.hours.open);
         setCloseTime(dayData.hours.close);
         setStatus(dayData.status);
-        setSessionsToSell(dayData.sessionsToSell.toString());
         setError(null);
     }, [dayData]);
 
@@ -297,35 +385,33 @@ const DaySettingsSidebar: React.FC<DaySettingsSidebarProps> = ({ isOpen, onClose
         e.preventDefault(); 
         if (!tank || !dayData) return; 
 
-        // Basic validation
         if (status === DAY_STATUS.BOOKABLE) {
             if (!openTime || !closeTime) {
                 setError("Open and Close times are required for a Bookable status.");
                 return;
             }
-            if (parseInt(sessionsToSell) < 0 || isNaN(parseInt(sessionsToSell))) {
-                setError("Available sessions count must be a non-negative number.");
-                return;
+             if (calculatedSessions <= 0) {
+                 setError(`Operating hours must allow for at least one ${dayData.sessionDuration}-minute session plus 30-minute break.`);
+                 return;
             }
         }
         
         setError(null);
         setIsSaving(true);
         
+        const finalSessionsToSell = status === DAY_STATUS.BOOKABLE ? calculatedSessions : 0;
+        
         try {
-            // Call the API service (sends a real POST request)
             const success = await apiService.updateDayStatus(
                 tank._id, 
                 dayData.date, 
                 status, 
                 openTime, 
                 closeTime,
-                parseInt(sessionsToSell), 
+                finalSessionsToSell, 
             );
 
             if (success) {
-                // Trigger onSave, which calls the modified fetchCalendarData 
-                // (prevents GET network call and keeps the current mock data visible)
                 await onSave(); 
                 onClose();
             } else {
@@ -415,22 +501,16 @@ const DaySettingsSidebar: React.FC<DaySettingsSidebarProps> = ({ isOpen, onClose
                                 </div>
                             </div>
 
-                            {/* Field: Default Count for Available Sessions (sessionsToSell) */}
+                            {/* Field: Display Calculated Session Count (MODIFIED) */}
                             <div>
-                                <label htmlFor="sessionsToSell" className="block text-sm font-medium text-gray-700">
-                                    Default Available Sessions
+                                <label className="block text-sm font-medium text-gray-700">
+                                    Calculated Available Sessions ({dayData.sessionDuration} min session + 30 min break)
                                 </label>
-                                <input
-                                    id="sessionsToSell"
-                                    type="number"
-                                    min="0"
-                                    value={sessionsToSell}
-                                    onChange={(e: ChangeEvent<HTMLInputElement>) => setSessionsToSell(e.target.value)}
-                                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2"
-                                    required
-                                />
+                                <div className="mt-1 block w-full rounded-md bg-gray-100 border border-gray-300 shadow-sm p-2 text-lg font-bold text-blue-700">
+                                    {calculatedSessions}
+                                </div>
                                 <p className="text-xs text-gray-500 mt-1">
-                                    Max number of sessions to sell for this tank on this day.
+                                    Max sessions calculated based on hours.
                                 </p>
                             </div>
                         </div>
@@ -505,19 +585,27 @@ const TankTypeCalendar: React.FC<TankTypeCalendarProps> = ({ tank, startDate, en
         else {
             newStatus = DAY_STATUS.CLOSED;
         }
+
+        // Calculate sessions based on the new status
+        let finalSessionsToSell = dayData.sessionsToSell;
+        if (newStatus === DAY_STATUS.BOOKABLE) {
+             finalSessionsToSell = calculateSessionCount(dayData.hours.open, dayData.hours.close, dayData.sessionDuration);
+        } else if (newStatus === DAY_STATUS.CLOSED) {
+            finalSessionsToSell = 0;
+        }
         
         try {
-            // Use apiService (This calls the REAL POST)
+            // Use apiService (This calls the REAL POST, passing tank._id)
             await apiService.updateDayStatus(
                 tank._id, 
                 dayData.date, 
                 newStatus, 
                 dayData.hours.open, 
                 dayData.hours.close,
-                dayData.sessionsToSell,
+                finalSessionsToSell, // Use the calculated value
             );
             
-            // Re-fetch data, which will now run the MOCKED GET to prevent network traffic
+            // Re-fetch data, which will now run the full fetch logic
             onDataUpdate(); 
         } catch (e) {
              console.error("Failed to toggle status:", e);
@@ -554,7 +642,7 @@ const TankTypeCalendar: React.FC<TankTypeCalendarProps> = ({ tank, startDate, en
                 <h2 className="text-xl font-bold text-gray-800 flex items-center">
                     <Zap className="h-5 w-5 mr-2 text-blue-500" />
                     {tank.tankName}
-                    <span className="text-sm font-normal text-gray-500 ml-2">(ID: {tank._id.split('-')[1]})</span>
+                    <span className="text-sm font-normal text-gray-500 ml-2">(ID: {tank._id.slice(-4)})</span>
                 </h2>
                 {/* Removed Bulk Edit Button */}
             </div>
@@ -721,24 +809,90 @@ const App: React.FC = () => {
     const [startDate, setStartDate] = useState<Date>(initialStartDate);
     const [endDate, setEndDate] = useState<Date>(initialEndDate);
     
-    // Initialize tanks directly with mock data
-    const [tanks, setTanks] = useState<Tank[]>(generateMockTanks(initialStartDate, initialEndDate)); 
-    const [loading, setLoading] = useState(false); // Set to false to show table immediately
+    const [tanks, setTanks] = useState<Tank[]>([]); 
+    const [loading, setLoading] = useState(true); 
 
-    // fetchCalendarData is now modified to skip network calls and use local state
-    const fetchCalendarData = useCallback(async () => {
-        // This simulates a successful fetch without hitting the network.
-        const currentTanks = await apiService.getTanksForCalendar(tanks); 
-        // We update the state to trigger a re-render, even though the data hasn't changed.
-        setTanks(currentTanks); 
-    }, [tanks]);
-    
-    // The initial fetch useEffect is deliberately commented out to prevent GET on load:
-    /*
+    const fetchTanksAndCalendar = useCallback(async (isInitialLoad = false) => {
+        if (isInitialLoad) setLoading(true);
+
+        try {
+            // 1. Fetch System Settings (Global Defaults)
+            const systemSettingsPromise = apiService.getSystemSettings();
+            
+            // 2. Fetch the list of Tanks
+            const backendTanksPromise = apiService.getTanks();
+            
+            // Execute parallel fetches
+            const [systemSettings, backendTanks] = await Promise.all([
+                systemSettingsPromise,
+                backendTanksPromise
+            ]);
+
+            // 3. Fetch all Calendar Overrides for the date range
+            const formattedStartDate = _format(startDate, "yyyy-MM-dd");
+            const formattedEndDate = _format(endDate, "yyyy-MM-dd");
+            const overrides = await apiService.getCalendarOverrides(formattedStartDate, formattedEndDate);
+            
+            // 4. GENERATE AND MERGE CALENDAR DATA
+            const calendarTanks = backendTanks.map(bTank => {
+                // Generate base structure using System Settings for defaults
+                const baseTank = generateCalendarTank(bTank, startDate, endDate, systemSettings);
+
+                // Apply overrides from the database
+                const updatedCalendarDays = baseTank.calendarDays.map(day => {
+                    // Find an override matching BOTH tank ID and date
+                    const override = overrides.find(o => o.tankId === bTank._id && o.date === day.date);
+
+                    if (override) {
+                        // Use calendar override open/close times, falling back to System Settings if empty in DB
+                        const newOpen = override.openTime || systemSettings.openTime;
+                        const newClose = override.closeTime || systemSettings.closeTime;
+                        
+                        // Use DB sessionsToSell if set, otherwise recalculate based on new hours
+                        let newSessions = override.sessionsToSell > 0 ? override.sessionsToSell : calculateSessionCount(newOpen, newClose, bTank.sessionDuration);
+                        
+                        return {
+                            ...day,
+                            status: override.status,
+                            hours: {
+                                open: newOpen,
+                                close: newClose,
+                            },
+                            sessionsToSell: newSessions,
+                            // NOTE: bookedSessions remains mocked/base data, but sessionsToSell is updated
+                            availableSessions: newSessions - day.bookedSessions, 
+                        };
+                    }
+                    return day;
+                });
+                
+                return {
+                    ...baseTank,
+                    calendarDays: updatedCalendarDays
+                };
+            });
+            
+            setTanks(calendarTanks); 
+
+        } catch (err) {
+            console.error("Failed to fetch tanks, settings, or calendar data:", err);
+            setTanks([]);
+        } finally {
+            if (isInitialLoad) setLoading(false);
+        }
+    }, [startDate, endDate]);
+
+
     useEffect(() => {
-        // This would call fetchCalendarData(true);
-    }, [fetchCalendarData]);
-    */
+        // Fetch tanks and calendar data on initial mount and date range change
+        fetchTanksAndCalendar(true);
+    }, [fetchTanksAndCalendar]);
+
+    // fetchCalendarData is now modified to trigger a refresh via the full fetch function
+    const fetchCalendarData = useCallback(async () => {
+        fetchTanksAndCalendar(false);
+    }, [fetchTanksAndCalendar]);
+
 
     const navigateDateRange = (direction: 'prev' | 'next') => {
         if (!startDate || !endDate) return;
@@ -761,8 +915,7 @@ const App: React.FC = () => {
         }
         setStartDate(newStart);
         setEndDate(newEnd);
-        // Regenerate mock data for the new range
-        setTanks(generateMockTanks(newStart, newEnd));
+        // fetchTanksAndCalendar will run automatically due to dependency change in useEffect
     };
 
     return (
@@ -810,7 +963,7 @@ const App: React.FC = () => {
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
                 {loading ? (
                     <div className="text-center py-20 text-xl font-medium text-gray-500">
-                        <span className="animate-pulse">Loading tank schedules...</span>
+                        <span className="animate-pulse">Loading schedules...</span>
                     </div>
                 ) : !startDate || !endDate ? (
                     <p className="text-center py-20 text-lg text-gray-500">Date range is invalid. Please refresh the page.</p>
@@ -827,7 +980,7 @@ const App: React.FC = () => {
                         ))}
                     </div>
                 ) : (
-                    <p className="text-center py-20 text-lg text-gray-500">No floating tanks found or no data for the selected range.</p>
+                    <p className="text-center py-20 text-lg text-gray-500">No floating tanks found or failed to load schedule data.</p>
                 )}
             </div>
         </div>
