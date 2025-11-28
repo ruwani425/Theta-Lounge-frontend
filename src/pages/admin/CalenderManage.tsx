@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useMemo, type ChangeEvent, type FormEvent } from "react";
-import { Calendar as CalendarIcon, X, Check, Clock, Edit, Lock, Unlock, Zap, XCircle, CheckCircle, Save, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Calendar as CalendarIcon, X, Clock, Edit, Lock, Unlock, Zap, XCircle, CheckCircle, Save, ChevronLeft, ChevronRight } from 'lucide-react';
 
 // --- Import the actual apiRequest from axios.ts ---
 import apiRequest from "../../core/axios"; 
@@ -85,104 +85,92 @@ interface Hours {
     close: string; // e.g., "21:00"
 }
 
-/** Represents the data for a single tank on a single calendar day. */
-interface DayData {
+// Tank Model (Dynamic, fetched from API)
+interface Tank { 
+    _id: string;
+    name: string; 
+    sessionDuration: number; // Duration in minutes (e.g., 60 minutes)
+}
+
+/** Represents the aggregated/consolidated data for a single calendar day (one table row). */
+interface FacilityDayData {
     date: string; // "yyyy-MM-dd"
     status: DayStatus;
     hours: Hours;
-    sessionsToSell: number;
-    bookedSessions: number;
-    availableSessions: number;
-    sessionDuration: number; 
+    totalAvailableSessions: number; // Sum of available sessions across all tanks
+    totalBookedSessions: number; // Sum of booked sessions across all tanks
+    overrideData: CalendarDetailFromBackend[]; 
 }
 
 /** The structure for calendar data fetched from the provided backend GET endpoint. */
 interface CalendarDetailFromBackend {
-    _id: string; // MongoDB ID
-    tankId: string; // MongoDB Tank ID
-    date: string; // YYYY-MM-DD
+    _id?: string; 
+    tankId: string; 
+    date: string; 
     status: DayStatus;
     openTime: string; 
     closeTime: string; 
     sessionsToSell: number;
+    bookedSessions: number; 
+}
+
+/** The POST payload structure for a facility-wide update (tankId omitted). */
+interface FacilityUpdatePayload {
+    date: string;
+    status: DayStatus;
+    openTime: string;
+    closeTime: string;
+    sessionsToSell: number; 
 }
 
 /** The overall response structure expected from the backend GET/POST endpoints. */
-interface CalendarApiResponse<T> {
+interface ApiResponse<T> {
     success: boolean;
     data: T;
     message?: string;
 }
 
-// NEW: Fetched from /api/system-settings
+// System Settings (Global Defaults)
 interface SystemSettings {
-  defaultFloatPrice: number;
-  cleaningBuffer: number;
-  sessionsPerDay: number;
-  openTime: string; // Used for default hours
-  closeTime: string; // Used for default hours
+    defaultFloatPrice: number;
+    cleaningBuffer: number;
+    sessionsPerDay: number;
+    openTime: string; // Used for default hours
+    closeTime: string; // Used for default hours
 }
 
-// --- NEW TYPE: Reflects the MongoDB Tank Model for fetching ---
-interface BackendTank {
-    _id: string;
-    name: string; // Used as tankName/tankType
-    capacity: number;
-    sessionDuration: number; // Duration in minutes
-}
-
-
-/** Represents a single floating therapy tank (resource) prepared for the calendar. */
-interface Tank { 
-    _id: string;
-    tankName: string; 
-    tankType: string; 
-    sessionDuration: number; 
-    calendarDays: DayData[];
-}
 
 // --- SESSION CALCULATION UTILITY ---
 
-const BREAK_DURATION_MINUTES = 30; // 30 minute break
-const TOTAL_CYCLE_MINUTES = (sessionDuration: number) => sessionDuration + BREAK_DURATION_MINUTES;
+// User requirement: 1 hour session (60 min) + 1/2 hour cleaning (30 min) = 90 min total cycle
+const SESSION_DURATION_MINUTES = 60;
+const BREAK_DURATION_MINUTES = 30; 
+const TOTAL_CYCLE_MINUTES = SESSION_DURATION_MINUTES + BREAK_DURATION_MINUTES; // 90 minutes
 
 /**
- * Calculates the maximum number of full sessions based on dynamic session duration.
- * The calculation now uses the actual duration from the tank data.
- * @param openTime Time string (HH:mm)
- * @param closeTime Time string (HH:mm)
- * @param sessionDuration The duration of one session in minutes (e.g., 90)
- * @returns The count of full sessions.
+ * Calculates the maximum number of full sessions based on the fixed 90-minute cycle time.
+ * This function calculates the max sessions available in the time slot for ONE single resource.
  */
-const calculateSessionCount = (openTime: string, closeTime: string, sessionDuration: number): number => {
-    if (sessionDuration <= 0) return 0;
-    const cycleTime = TOTAL_CYCLE_MINUTES(sessionDuration);
+const calculateSessionCountPerTank = (openTime: string, closeTime: string): number => {
+    const cycleTime = TOTAL_CYCLE_MINUTES;
 
     try {
         const fixedDate = '2000/01/01'; 
         const open = new Date(`${fixedDate} ${openTime}`);
         const close = new Date(`${fixedDate} ${closeTime}`);
 
-        if (close.getTime() <= open.getTime()) {
-             return 0; 
-        }
+        if (close.getTime() <= open.getTime()) return 0; 
 
         const durationMinutes = (close.getTime() - open.getTime()) / (60 * 1000);
-        
-        // Calculate number of full cycles
-        const totalSessions = Math.floor(durationMinutes / cycleTime);
-        
-        return totalSessions;
-
+        return Math.floor(durationMinutes / cycleTime);
     } catch (e) {
         return 0;
     }
 }
 
 
-// --- BASE DATA DEFAULTS (FALLBACK) ---
+// --- BASE DATA DEFAULTS ---
 
-// Fallback defaults if API fails
 const GLOBAL_DEFAULTS: SystemSettings = {
     defaultFloatPrice: 0,
     cleaningBuffer: 30,
@@ -191,123 +179,79 @@ const GLOBAL_DEFAULTS: SystemSettings = {
     closeTime: '21:00' 
 };
 
+// Placeholder for a base tank used only for sidebar default generation
+const DEFAULT_TANK: Tank = { _id: "default-tank-id", name: "Default", sessionDuration: SESSION_DURATION_MINUTES };
 
-const generateDayData = (date: Date, tank: BackendTank, settings: SystemSettings): DayData => {
-    // Use System Settings for default hours
+
+/**
+ * Generates the base DayData for a single tank, including mocked bookings.
+ */
+const generateBaseDayData = (date: Date, tank: Tank, settings: SystemSettings, totalFacilitySessions: number): CalendarDetailFromBackend => {
     const openTime = settings.openTime;
     const closeTime = settings.closeTime;
     
-    // Calculate sessions based on settings and tank duration
-    const sessionsAvailable = calculateSessionCount(openTime, closeTime, tank.sessionDuration);
+    // Sessions based on global time/default hours (Per Tank)
+    const sessionsAvailablePerTank = calculateSessionCountPerTank(openTime, closeTime);
     
-    // Default status and booking data (will be overridden by fetched CalendarDetail)
-    let sessionsToSell = sessionsAvailable; 
-    let bookedSessions = Math.floor(Math.random() * (sessionsAvailable * 0.5)); // Simulate some bookings
-
-    let status: DayStatus = sessionsToSell > bookedSessions ? DAY_STATUS.BOOKABLE : DAY_STATUS.SOLD_OUT;
+    // We mock the booked sessions based on the single tank's capacity for the default record
+    let bookedSessionsPerTank = Math.floor(Math.random() * (sessionsAvailablePerTank * 0.5)); 
     
     return {
+        tankId: tank._id, 
         date: _format(date, 'yyyy-MM-dd'),
-        status: status,
-        hours: { open: openTime, close: closeTime },
-        sessionsToSell,
-        bookedSessions,
-        availableSessions: sessionsToSell - bookedSessions,
-        sessionDuration: tank.sessionDuration,
-    };
-};
-
-/**
- * Creates the calendar structure using data from a fetched BackendTank and System Settings.
- */
-const generateCalendarTank = (backendTank: BackendTank, startDate: Date, endDate: Date, settings: SystemSettings): Tank => { 
-    const dates: Date[] = [];
-    let currentDate = _startOfDay(startDate);
-    const end = _endOfDay(endDate);
-
-    while (currentDate.getTime() < end.getTime()) {
-        dates.push(currentDate);
-        currentDate = _addDays(currentDate, 1);
-    }
-    
-    return {
-        _id: backendTank._id,
-        tankName: backendTank.name, 
-        tankType: backendTank.name,
-        sessionDuration: backendTank.sessionDuration,
-        calendarDays: dates.map(date => generateDayData(date, backendTank, settings)),
+        status: DAY_STATUS.BOOKABLE,
+        openTime: openTime, 
+        closeTime: closeTime,
+        // For the detail, we store per-tank sessions, but for the main table, we use the aggregated total
+        sessionsToSell: sessionsAvailablePerTank, 
+        bookedSessions: bookedSessionsPerTank, 
     };
 };
 
 
 // --- API SERVICE IMPLEMENTATION ---
 
-const CALENDAR_API_BASE_URL = "/calendar"; // Consistent with app.ts for robust GET/POST
-const TANK_API_BASE_URL = "/tanks"; // Retaining user-defined path for tanks
-const SETTINGS_API_BASE_URL = "/system-settings"; // Correct path based on app.ts
+const CALENDAR_API_BASE_URL = "/calendar";
+const SETTINGS_API_BASE_URL = "/system-settings";
+const TANK_API_BASE_URL = "/tanks"; // New API base URL
 
 const apiService = {
-    /**
-     * Fetches system settings (global defaults).
-     */
     getSystemSettings: async (): Promise<SystemSettings> => {
         try {
-            // Path: /api/system-settings
-            const settings = await apiRequest.get<SystemSettings>(SETTINGS_API_BASE_URL); 
-            console.log("✅ Success: Fetched system settings.");
-            
-            // Return fetched settings, merging with global defaults in case of missing fields
-            return { ...GLOBAL_DEFAULTS, ...settings };
+            const response = await apiRequest.get<{ data: SystemSettings }>(SETTINGS_API_BASE_URL); 
+            return { ...GLOBAL_DEFAULTS, ...response.data };
         } catch (error) {
-            console.error("❌ Failed to fetch system settings. Using fallback defaults.", error);
-            return GLOBAL_DEFAULTS; // Return robust fallback
+            return GLOBAL_DEFAULTS;
         }
     },
 
-    /**
-     * Fetches the list of all tanks from the backend.
-     */
-    getTanks: async (): Promise<BackendTank[]> => {
+    // NEW API CALL to fetch all tanks
+    getAllTanks: async (): Promise<Tank[]> => {
         try {
-            // Uses apiRequest.get('/tanks')
-            const tanks = await apiRequest.get<BackendTank[]>(TANK_API_BASE_URL); 
-            console.log(`✅ Success: Fetched ${tanks.length} tanks from backend via ${TANK_API_BASE_URL}.`);
-
-            // If the backend returns an empty array, provide a mock tank for display
-            if (!tanks || tanks.length === 0) {
-                 return [{ 
-                    _id: "mock-tank-1", 
-                    name: "Default Float Pod", 
-                    capacity: 1, 
-                    sessionDuration: 90 
-                }];
-            }
-            return tanks;
+            const response = await apiRequest.get<Tank[]>(TANK_API_BASE_URL); 
+            // Assuming the tank endpoint returns an array of tanks directly
+            return response || [];
         } catch (error) {
-            console.error(`❌ API Request Error: Failed to fetch tanks from ${TANK_API_BASE_URL}.`, error);
-            // Return a mock tank on failure to keep the app runnable
-            return [{ 
-                _id: "error-tank-1", 
-                name: "Fallback Float Pod", 
-                capacity: 1, 
-                sessionDuration: 90 
-            }];
+            console.error("❌ Failed to fetch tanks. Falling back to 0 tanks.", error);
+            return [];
         }
     },
     
-    /**
-     * Fetches existing calendar details (overrides) for a date range.
-     */
     getCalendarOverrides: async (formattedStartDate: string, formattedEndDate: string): Promise<CalendarDetailFromBackend[]> => {
         try {
-            // Using /api/calendar as per app.ts 
-            const apiResponse = await apiRequest.get<CalendarApiResponse<CalendarDetailFromBackend[]>>(CALENDAR_API_BASE_URL, {
+            // Assuming this still fetches facility-wide or all tank overrides for the range
+            const apiResponse = await apiRequest.get<ApiResponse<CalendarDetailFromBackend[]>>(CALENDAR_API_BASE_URL, {
                 params: { startDate: formattedStartDate, endDate: formattedEndDate }
             });
 
-            if (apiResponse.success) {
-                console.log(`✅ Success: Fetched ${apiResponse.data.length} calendar overrides.`);
-                return apiResponse.data;
+            if (apiResponse.success && apiResponse.data) {
+                return apiResponse.data.map(override => ({
+                    ...override,
+                    // Use sessionsToSell field to store the Facility TOTAL sessions
+                    // Mock booked sessions based on the total sessions to sell
+                    bookedSessions: Math.min(override.sessionsToSell, override.bookedSessions !== undefined ? override.bookedSessions : Math.floor(Math.random() * (override.sessionsToSell * 0.2))),
+                    tankId: override.tankId || DEFAULT_TANK._id, // Ensure tankId exists for typing consistency
+                }));
             }
             return [];
         } catch (error) {
@@ -317,62 +261,63 @@ const apiService = {
     },
 
     /**
-     * Performs a REAL POST request to update a single day's settings.
+     * Performs a POST request for a facility-wide update, including the CALCULATED TOTAL sessionsToSell.
      */
-    updateDayStatus: async (
-        tankId: string, 
+    updateFacilityStatus: async (
         date: string, 
         status: DayStatus, 
         openTime: string, 
         closeTime: string,
-        sessionsToSell: number,
+        sessionsToSell: number // This is the total for ALL tanks
     ): Promise<boolean> => {
         try {
-            const apiResponse = await apiRequest.post<CalendarApiResponse<any>>(CALENDAR_API_BASE_URL, {
-                tankId, 
+            const payload: FacilityUpdatePayload = {
                 date,
                 status,
                 openTime,
                 closeTime,
-                sessionsToSell: Number(sessionsToSell), 
-            });
+                sessionsToSell, 
+            };
+
+            const apiResponse = await apiRequest.post<ApiResponse<any>>(CALENDAR_API_BASE_URL, payload);
             
             if (apiResponse.success) {
                 return true;
             } else {
-                console.error(`❌ Error: API responded with unsuccessful payload.`, apiResponse.message);
                 return false;
             }
         } catch (error: any) {
             const displayError = (error && error.message) || (error && error.data && error.data.message) || "Unknown server error or network issue.";
-            console.error("❌ API Request Error: Failed to save day settings (POST failed).", displayError);
             throw new Error(`Save failed: ${displayError}`);
         }
     }
 };
 
-// --- UI COMPONENTS (Minimal changes required) ---
+// --- UI COMPONENTS ---
 
-// 3. Day Settings Sidebar
 interface DaySettingsSidebarProps {
     isOpen: boolean;
     onClose: () => void;
-    tank: Tank; 
-    dayData: DayData;
+    dayData: FacilityDayData;
     onSave: () => void;
+    tankCount: number; // Pass dynamic tank count
 }
 
-const DaySettingsSidebar: React.FC<DaySettingsSidebarProps> = ({ isOpen, onClose, tank, dayData, onSave }) => {
+const DaySettingsSidebar: React.FC<DaySettingsSidebarProps> = ({ isOpen, onClose, dayData, onSave, tankCount }) => {
+    
     const [openTime, setOpenTime] = useState(dayData.hours.open);
     const [closeTime, setCloseTime] = useState(dayData.hours.close);
     const [status, setStatus] = useState<DayStatus>(dayData.status);
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    const calculatedSessions = useMemo(() => {
-        return calculateSessionCount(openTime, closeTime, dayData.sessionDuration);
-    }, [openTime, closeTime, dayData.sessionDuration]);
+    // Calculate max sessions for ONE tank based on current hours
+    const maxSessionsPerTank = useMemo(() => {
+        return calculateSessionCountPerTank(openTime, closeTime);
+    }, [openTime, closeTime]);
 
+    // Calculate total sessions for the entire facility using the dynamic tank count
+    const calculatedFacilitySessions = maxSessionsPerTank * tankCount;
 
     useEffect(() => {
         setOpenTime(dayData.hours.open);
@@ -381,68 +326,68 @@ const DaySettingsSidebar: React.FC<DaySettingsSidebarProps> = ({ isOpen, onClose
         setError(null);
     }, [dayData]);
 
+
     const handleSave = async (e: FormEvent) => {
         e.preventDefault(); 
-        if (!tank || !dayData) return; 
+        if (!dayData) return; 
 
         if (status === DAY_STATUS.BOOKABLE) {
             if (!openTime || !closeTime) {
                 setError("Open and Close times are required for a Bookable status.");
                 return;
             }
-             if (calculatedSessions <= 0) {
-                 setError(`Operating hours must allow for at least one ${dayData.sessionDuration}-minute session plus 30-minute break.`);
+            if (maxSessionsPerTank <= 0) {
+                 setError(`Operating hours must allow for at least one ${TOTAL_CYCLE_MINUTES}-minute cycle.`);
                  return;
             }
         }
+
+        const finalSessionsToSell = status === DAY_STATUS.BOOKABLE ? calculatedFacilitySessions : 0;
         
         setError(null);
         setIsSaving(true);
         
-        const finalSessionsToSell = status === DAY_STATUS.BOOKABLE ? calculatedSessions : 0;
-        
         try {
-            const success = await apiService.updateDayStatus(
-                tank._id, 
+            const success = await apiService.updateFacilityStatus(
                 dayData.date, 
                 status, 
                 openTime, 
                 closeTime,
-                finalSessionsToSell, 
+                finalSessionsToSell // SENDING THE CALCULATED COUNT
             );
 
             if (success) {
                 await onSave(); 
                 onClose();
             } else {
-                setError("Failed to save changes due to a policy error on the server.");
+                setError("Failed to save changes due to a server policy error.");
             }
         } catch (e: any) {
             const displayError = e.message || "An unexpected network or server error occurred.";
             setError(displayError);
-            console.error("Save failed in component catch:", e);
         } finally {
             setIsSaving(false);
         }
     };
 
     const sidebarClass = `fixed inset-y-0 right-0 w-80 bg-white p-6 shadow-2xl transition-transform duration-300 ease-in-out z-[100] ${isOpen ? 'translate-x-0' : 'translate-x-full'}`;
-
     const formattedDate = _format(new Date(dayData.date), 'EEEE, MMMM do, yyyy');
 
     return (
         <>
             <div className={sidebarClass}>
                 <div className="flex justify-between items-center pb-4 border-b">
-                    <h2 className="text-xl font-semibold text-gray-800">Day Settings</h2>
+                    <h2 className="text-xl font-semibold text-gray-800">Facility Day Settings</h2>
                     <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-2 rounded-full">
                         <X className="h-6 w-6" />
                     </button>
                 </div>
                 
                 <form onSubmit={handleSave} className="mt-4 space-y-4 h-[calc(100%-60px)] flex flex-col">
-                    <p className="text-sm font-medium text-blue-600">{tank.tankName}</p>
                     <h3 className="text-lg font-bold text-gray-700">{formattedDate}</h3>
+                    <p className="text-sm text-gray-500">
+                        This update sets the **status and hours for ALL {tankCount} tanks**.
+                    </p>
                     
                     {error && (
                         <div className="bg-red-100 border border-red-400 text-red-700 px-3 py-2 rounded relative text-sm" role="alert">
@@ -452,14 +397,14 @@ const DaySettingsSidebar: React.FC<DaySettingsSidebarProps> = ({ isOpen, onClose
                     )}
                     
                     <div className="space-y-2">
-                        <label htmlFor="status" className="block text-sm font-medium text-gray-700">Day Status</label>
+                        <label htmlFor="status" className="block text-sm font-medium text-gray-700">Facility Status</label>
                         <div className="flex space-x-2">
                             <button
                                 type="button"
                                 onClick={() => setStatus(DAY_STATUS.BOOKABLE)}
                                 className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${status === DAY_STATUS.BOOKABLE ? 'bg-green-100 text-green-700 border border-green-300' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
                             >
-                                <CheckCircle className="inline h-4 w-4 mr-1" /> Bookable
+                                <CheckCircle className="inline h-4 w-4 mr-1" /> Open
                             </button>
                             <button
                                 type="button"
@@ -500,17 +445,16 @@ const DaySettingsSidebar: React.FC<DaySettingsSidebarProps> = ({ isOpen, onClose
                                     />
                                 </div>
                             </div>
-
-                            {/* Field: Display Calculated Session Count (MODIFIED) */}
+                            {/* Display Calculated Session Count */}
                             <div>
                                 <label className="block text-sm font-medium text-gray-700">
-                                    Calculated Available Sessions ({dayData.sessionDuration} min session + 30 min break)
+                                    Calculated Total Sessions ({tankCount} tanks * {TOTAL_CYCLE_MINUTES} min cycle)
                                 </label>
                                 <div className="mt-1 block w-full rounded-md bg-gray-100 border border-gray-300 shadow-sm p-2 text-lg font-bold text-blue-700">
-                                    {calculatedSessions}
+                                    {calculatedFacilitySessions}
                                 </div>
                                 <p className="text-xs text-gray-500 mt-1">
-                                    Max sessions calculated based on hours.
+                                    Max sessions calculated based on hours for all tanks.
                                 </p>
                             </div>
                         </div>
@@ -524,7 +468,7 @@ const DaySettingsSidebar: React.FC<DaySettingsSidebarProps> = ({ isOpen, onClose
                             className="w-full flex items-center justify-center py-3 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-blue-400"
                         >
                             <Save className="h-5 w-5 mr-2" />
-                            {isSaving ? 'Saving...' : 'Save Changes'}
+                            {isSaving ? 'Applying Globally...' : 'Apply Status & Hours'}
                         </button>
                     </div>
                 </form>
@@ -541,241 +485,7 @@ const DaySettingsSidebar: React.FC<DaySettingsSidebarProps> = ({ isOpen, onClose
     );
 };
 
-// 2. TankTypeCalendar Component
-interface TankTypeCalendarProps { 
-    tank: Tank; 
-    startDate: Date;
-    endDate: Date;
-    onDataUpdate: () => void;
-}
-
-const TankTypeCalendar: React.FC<TankTypeCalendarProps> = ({ tank, startDate, endDate, onDataUpdate }) => { 
-    const dates = useMemo(() => {
-        if (!startDate || !endDate) return [];
-        const days: Date[] = [];
-        let currentDate = _startOfDay(startDate);
-        const end = _endOfDay(endDate);
-
-        while (currentDate.getTime() < end.getTime()) {
-            days.push(currentDate);
-            currentDate = _addDays(currentDate, 1);
-        }
-        return days;
-    }, [startDate, endDate]);
-
-    const daysCount = dates.length;
-    
-    const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-    const [selectedDayData, setSelectedDayData] = useState<DayData | null>(null);
-
-    const getCellWidth = (): string => {
-        if (daysCount <= 7) return 'w-32';
-        if (daysCount <= 14) return 'w-24';
-        return 'w-20';
-    };
-
-    const toggleDayStatus = async (dayData: DayData) => {
-        if (!dayData || !dayData.date) return; 
-
-        let newStatus: DayStatus;
-        
-        if (dayData.status === DAY_STATUS.CLOSED) {
-            newStatus = DAY_STATUS.BOOKABLE;
-        } 
-        else {
-            newStatus = DAY_STATUS.CLOSED;
-        }
-
-        // Calculate sessions based on the new status
-        let finalSessionsToSell = dayData.sessionsToSell;
-        if (newStatus === DAY_STATUS.BOOKABLE) {
-             finalSessionsToSell = calculateSessionCount(dayData.hours.open, dayData.hours.close, dayData.sessionDuration);
-        } else if (newStatus === DAY_STATUS.CLOSED) {
-            finalSessionsToSell = 0;
-        }
-        
-        try {
-            // Use apiService (This calls the REAL POST, passing tank._id)
-            await apiService.updateDayStatus(
-                tank._id, 
-                dayData.date, 
-                newStatus, 
-                dayData.hours.open, 
-                dayData.hours.close,
-                finalSessionsToSell, // Use the calculated value
-            );
-            
-            // Re-fetch data, which will now run the full fetch logic
-            onDataUpdate(); 
-        } catch (e) {
-             console.error("Failed to toggle status:", e);
-             // In a real app, show a toast/modal error here
-        }
-    };
-
-    const openDaySettings = (date: Date) => {
-        const dayData = tank.calendarDays.find(d => d.date === _format(date, 'yyyy-MM-dd'));
-        if (dayData) {
-            setSelectedDayData(dayData);
-            setIsSidebarOpen(true);
-        }
-    };
-
-    const getStatusColor = (status: DayStatus): string => {
-        switch (status) {
-            case DAY_STATUS.BOOKABLE:
-                return 'bg-green-100 text-green-700 hover:bg-green-200';
-            case DAY_STATUS.CLOSED:
-                return 'bg-red-100 text-red-700 hover:bg-red-200';
-            case DAY_STATUS.SOLD_OUT:
-                return 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200';
-            default:
-                return 'bg-gray-100 text-gray-700';
-        }
-    };
-
-    const tableContent = tank.calendarDays;
-
-    return (
-        <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
-            <div className="p-4 flex justify-between items-center border-b">
-                <h2 className="text-xl font-bold text-gray-800 flex items-center">
-                    <Zap className="h-5 w-5 mr-2 text-blue-500" />
-                    {tank.tankName}
-                    <span className="text-sm font-normal text-gray-500 ml-2">(ID: {tank._id.slice(-4)})</span>
-                </h2>
-                {/* Removed Bulk Edit Button */}
-            </div>
-
-            <div className="overflow-x-auto relative">
-                <table className="min-w-full divide-y divide-gray-200 border-collapse">
-                    <thead>
-                        <tr className="bg-gray-50 sticky top-0 z-20">
-                            <th className="sticky left-0 bg-gray-50 p-3 text-left text-xs font-semibold text-gray-600 uppercase w-32 min-w-[128px] border-r border-gray-200 shadow-inner-right">
-                                Dates
-                            </th>
-                            {dates.map((date, index) => {
-                                const formattedDate = _format(date, 'MMM dd');
-                                const dayOfWeek = _format(date, 'EEE');
-                                return (
-                                    <th
-                                        key={index}
-                                        className={`${getCellWidth()} p-2 text-center text-xs font-semibold uppercase cursor-pointer hover:bg-blue-50 transition-colors`}
-                                        onClick={() => openDaySettings(date)}
-                                    >
-                                        <div className="text-gray-900 font-bold text-sm">{formattedDate}</div>
-                                        <div className="text-gray-500">{dayOfWeek}</div>
-                                    </th>
-                                );
-                            })}
-                        </tr>
-                    </thead>
-                    
-                    <tbody>
-                        {/* 1. Tank Status (Bookable/Closed) Row */}
-                        <tr>
-                            <td className="sticky left-0 bg-white p-3 text-left text-sm font-medium text-gray-800 border-r border-gray-200 shadow-inner-right whitespace-nowrap">
-                                Tank Status
-                            </td>
-                            {dates.map((date, index) => {
-                                const dayData = tank.calendarDays.find(d => d.date === _format(date, 'yyyy-MM-dd')) || {} as DayData;
-                                return (
-                                    <td key={index} className={`${getCellWidth()} p-2 text-center`}>
-                                        <button
-                                            onClick={() => toggleDayStatus(dayData)}
-                                            disabled={!dayData.date}
-                                            className={`w-full py-1.5 rounded-full text-xs font-semibold transition-colors disabled:opacity-50 ${getStatusColor(dayData.status)}`}
-                                        >
-                                            <span className="flex items-center justify-center">
-                                                {dayData.status === DAY_STATUS.CLOSED ? <Lock className="h-3 w-3 mr-1" /> : <Unlock className="h-3 w-3 mr-1" />}
-                                                {dayData.status === DAY_STATUS.SOLD_OUT ? 'SOLD OUT' : dayData.status.toUpperCase()}
-                                            </span>
-                                        </button>
-                                    </td>
-                                );
-                            })}
-                        </tr>
-                        
-                        {/* --- NEW ROW: Open Time (Requested) --- */}
-                        <tr>
-                            <td className="sticky left-0 bg-white p-3 text-left text-sm font-medium text-gray-800 border-r border-gray-200 shadow-inner-right whitespace-nowrap">
-                                Open Time
-                            </td>
-                            {dates.map((date, index) => {
-                                const dayData = tableContent.find(d => d.date === _format(date, 'yyyy-MM-dd')) || {} as DayData;
-                                const timeDisplay = dayData.hours?.open || '-';
-                                return (
-                                    <td key={`open-${index}`} className={`${getCellWidth()} p-2 text-center text-sm font-medium ${dayData.status === DAY_STATUS.CLOSED ? 'text-gray-400' : 'text-gray-700'}`}>
-                                        {dayData.status === DAY_STATUS.CLOSED ? '-' : timeDisplay}
-                                    </td>
-                                );
-                            })}
-                        </tr>
-
-                        {/* --- NEW ROW: Close Time (Requested) --- */}
-                        <tr>
-                            <td className="sticky left-0 bg-white p-3 text-left text-sm font-medium text-gray-800 border-r border-gray-200 shadow-inner-right whitespace-nowrap">
-                                Close Time
-                            </td>
-                            {dates.map((date, index) => {
-                                const dayData = tableContent.find(d => d.date === _format(date, 'yyyy-MM-dd')) || {} as DayData;
-                                const timeDisplay = dayData.hours?.close || '-';
-                                return (
-                                    <td key={`close-${index}`} className={`${getCellWidth()} p-2 text-center text-sm font-medium ${dayData.status === DAY_STATUS.CLOSED ? 'text-gray-400' : 'text-gray-700'}`}>
-                                        {dayData.status === DAY_STATUS.CLOSED ? '-' : timeDisplay}
-                                    </td>
-                                );
-                            })}
-                        </tr>
-                        
-                        {/* 2. Available Sessions Count Row */}
-                        <tr>
-                            <td className="sticky left-0 bg-white p-3 text-left text-sm font-medium text-gray-800 border-r border-gray-200 shadow-inner-right whitespace-nowrap">
-                                Available Sessions
-                            </td>
-                            {dates.map((date, index) => {
-                                const dayData = tableContent.find(d => d.date === _format(date, 'yyyy-MM-dd')) || {} as DayData;
-                                return (
-                                    <td key={index} className={`${getCellWidth()} p-2 text-center text-sm font-semibold ${dayData.availableSessions > 0 ? 'text-green-600' : 'text-gray-500'}`}>
-                                        {dayData.status === DAY_STATUS.CLOSED ? '-' : dayData.availableSessions}
-                                    </td>
-                                );
-                            })}
-                        </tr>
-                        
-                        {/* 3. Booked Sessions Count Row */}
-                        <tr>
-                            <td className="sticky left-0 bg-white p-3 text-left text-sm font-medium text-gray-800 border-r border-gray-200 shadow-inner-right whitespace-nowrap">
-                                Booked Sessions
-                            </td>
-                            {dates.map((date, index) => {
-                                const dayData = tableContent.find(d => d.date === _format(date, 'yyyy-MM-dd')) || {} as DayData;
-                                return (
-                                    <td key={index} className={`${getCellWidth()} p-2 text-center text-sm font-semibold text-blue-600`}>
-                                        {dayData.status === DAY_STATUS.CLOSED ? '-' : dayData.bookedSessions}
-                                    </td>
-                                );
-                            })}
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-
-            {/* Day Settings Sidebar (Only render if open) */}
-            {isSidebarOpen && selectedDayData && (
-                <DaySettingsSidebar
-                    isOpen={isSidebarOpen}
-                    onClose={() => setIsSidebarOpen(false)}
-                    tank={tank}
-                    dayData={selectedDayData}
-                    onSave={onDataUpdate}
-                />
-            )}
-        </div>
-    );
-};
-
-// 5. Date Range Display
+// 5. Date Range Display (Unchanged)
 interface DateRangeDisplayProps {
     startDate: Date | null;
     endDate: Date | null;
@@ -809,89 +519,121 @@ const App: React.FC = () => {
     const [startDate, setStartDate] = useState<Date>(initialStartDate);
     const [endDate, setEndDate] = useState<Date>(initialEndDate);
     
-    const [tanks, setTanks] = useState<Tank[]>([]); 
+    const [calendarDays, setCalendarDays] = useState<FacilityDayData[]>([]); 
     const [loading, setLoading] = useState(true); 
 
-    const fetchTanksAndCalendar = useCallback(async (isInitialLoad = false) => {
+    // New state for dynamically fetched tanks
+    const [tanks, setTanks] = useState<Tank[]>([]);
+    const tankCount = tanks.length;
+
+    const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+    const [selectedDayData, setSelectedDayData] = useState<FacilityDayData | null>(null);
+
+    
+    const fetchTanks = useCallback(async () => {
+        const fetchedTanks = await apiService.getAllTanks();
+        setTanks(fetchedTanks);
+    }, []);
+
+    const fetchCalendarData = useCallback(async (isInitialLoad = false) => {
         if (isInitialLoad) setLoading(true);
 
-        try {
-            // 1. Fetch System Settings (Global Defaults)
-            const systemSettingsPromise = apiService.getSystemSettings();
-            
-            // 2. Fetch the list of Tanks
-            const backendTanksPromise = apiService.getTanks();
-            
-            // Execute parallel fetches
-            const [systemSettings, backendTanks] = await Promise.all([
-                systemSettingsPromise,
-                backendTanksPromise
-            ]);
+        // Calculate session capacity per tank now, as the tank count might change if fetched
+        const currentTankCount = tanks.length;
 
-            // 3. Fetch all Calendar Overrides for the date range
+        try {
+            const systemSettings = await apiService.getSystemSettings();
+            
             const formattedStartDate = _format(startDate, "yyyy-MM-dd");
             const formattedEndDate = _format(endDate, "yyyy-MM-dd");
-            const overrides = await apiService.getCalendarOverrides(formattedStartDate, formattedEndDate);
             
-            // 4. GENERATE AND MERGE CALENDAR DATA
-            const calendarTanks = backendTanks.map(bTank => {
-                // Generate base structure using System Settings for defaults
-                const baseTank = generateCalendarTank(bTank, startDate, endDate, systemSettings);
+            const facilityOverrides = await apiService.getCalendarOverrides(formattedStartDate, formattedEndDate);
+            
+            const dates: Date[] = [];
+            let currentDate = _startOfDay(startDate);
+            const end = _endOfDay(endDate);
 
-                // Apply overrides from the database
-                const updatedCalendarDays = baseTank.calendarDays.map(day => {
-                    // Find an override matching BOTH tank ID and date
-                    const override = overrides.find(o => o.tankId === bTank._id && o.date === day.date);
+            while (currentDate.getTime() < end.getTime()) {
+                dates.push(currentDate);
+                currentDate = _addDays(currentDate, 1);
+            }
+            
+            // Core Logic: Aggregate Overrides with System Defaults
+            const newCalendarDays: FacilityDayData[] = dates.map(date => {
+                const dateKey = _format(date, 'yyyy-MM-dd');
+                
+                const facilityRecord = facilityOverrides.find(o => o.date === dateKey);
 
-                    if (override) {
-                        // Use calendar override open/close times, falling back to System Settings if empty in DB
-                        const newOpen = override.openTime || systemSettings.openTime;
-                        const newClose = override.closeTime || systemSettings.closeTime;
-                        
-                        // Use DB sessionsToSell if set, otherwise recalculate based on new hours
-                        let newSessions = override.sessionsToSell > 0 ? override.sessionsToSell : calculateSessionCount(newOpen, newClose, bTank.sessionDuration);
-                        
-                        return {
-                            ...day,
-                            status: override.status,
-                            hours: {
-                                open: newOpen,
-                                close: newClose,
-                            },
-                            sessionsToSell: newSessions,
-                            // NOTE: bookedSessions remains mocked/base data, but sessionsToSell is updated
-                            availableSessions: newSessions - day.bookedSessions, 
-                        };
-                    }
-                    return day;
-                });
+                let status: DayStatus = DAY_STATUS.BOOKABLE;
+                let openTime = systemSettings.openTime;
+                let closeTime = systemSettings.closeTime;
+                let totalSessionsToSell = 0;
+                let totalBookedSessions = 0;
+                
+                if (facilityRecord) {
+                    // A. Use the database record (override)
+                    status = facilityRecord.status;
+                    openTime = facilityRecord.openTime || systemSettings.openTime;
+                    closeTime = facilityRecord.closeTime || systemSettings.closeTime;
+                    totalSessionsToSell = facilityRecord.sessionsToSell; 
+                    totalBookedSessions = facilityRecord.bookedSessions; 
+
+                } else {
+                    // B. Calculate total defaults using System Settings (no override found)
+                    const sessionsPerTank = calculateSessionCountPerTank(openTime, closeTime);
+                    // Use the DYNAMIC tank count
+                    totalSessionsToSell = sessionsPerTank * currentTankCount;
+
+                    // MOCKING: Assuming 20% of max sessions are booked by default if no record exists
+                    totalBookedSessions = Math.floor(totalSessionsToSell * 0.2); 
+                }
+
+                let totalAvailableSessions = totalSessionsToSell - totalBookedSessions;
+                
+                // Final Status Logic
+                if (status === DAY_STATUS.CLOSED) {
+                    totalAvailableSessions = 0;
+                    totalSessionsToSell = 0; 
+                } else if (totalAvailableSessions <= 0 && totalSessionsToSell > 0) {
+                    status = DAY_STATUS.SOLD_OUT;
+                    totalAvailableSessions = 0; 
+                }
                 
                 return {
-                    ...baseTank,
-                    calendarDays: updatedCalendarDays
+                    date: dateKey,
+                    status: status, 
+                    hours: { open: openTime, close: closeTime },
+                    totalAvailableSessions,
+                    totalBookedSessions,
+                    // Use the DEFAULT_TANK as a placeholder for the sidebar data structure
+                    overrideData: facilityRecord ? [facilityRecord] : [generateBaseDayData(date, DEFAULT_TANK, systemSettings, totalSessionsToSell)], 
                 };
             });
             
-            setTanks(calendarTanks); 
+            setCalendarDays(newCalendarDays); 
 
         } catch (err) {
-            console.error("Failed to fetch tanks, settings, or calendar data:", err);
-            setTanks([]);
+            console.error("Failed to process calendar data:", err);
+            setCalendarDays([]);
         } finally {
             if (isInitialLoad) setLoading(false);
         }
-    }, [startDate, endDate]);
+    }, [startDate, endDate, tanks.length]); // Dependency on tanks.length added
 
+    // Fetch tanks first, then fetch calendar data
+    useEffect(() => {
+        fetchTanks();
+    }, [fetchTanks]);
 
     useEffect(() => {
-        // Fetch tanks and calendar data on initial mount and date range change
-        fetchTanksAndCalendar(true);
-    }, [fetchTanksAndCalendar]);
-
-    // fetchCalendarData is now modified to trigger a refresh via the full fetch function
-    const fetchCalendarData = useCallback(async () => {
-        fetchTanksAndCalendar(false);
-    }, [fetchTanksAndCalendar]);
+        if (tanks.length > 0) {
+             fetchCalendarData(true);
+        } else if (loading && tanks.length === 0) {
+             // If loading and no tanks, assume fetching failed/0 tanks found, still render calendar with 0 sessions
+             fetchCalendarData(true);
+        }
+       
+    }, [tanks.length, fetchCalendarData]);
 
 
     const navigateDateRange = (direction: 'prev' | 'next') => {
@@ -915,8 +657,77 @@ const App: React.FC = () => {
         }
         setStartDate(newStart);
         setEndDate(newEnd);
-        // fetchTanksAndCalendar will run automatically due to dependency change in useEffect
     };
+    
+    const openDaySettings = (dayData: FacilityDayData) => {
+        setSelectedDayData(dayData);
+        setIsSidebarOpen(true);
+    };
+
+    // Function to handle inline status toggle
+    const toggleDayStatus = async (dayData: FacilityDayData) => {
+        if (!dayData || !dayData.date) return;
+        if (dayData.status === DAY_STATUS.SOLD_OUT) return; 
+
+        const newStatus: DayStatus = dayData.status === DAY_STATUS.CLOSED ? DAY_STATUS.BOOKABLE : DAY_STATUS.CLOSED;
+        
+        // Calculate the appropriate sessionsToSell to send with the POST request
+        const sessionsPerTank = calculateSessionCountPerTank(dayData.hours.open, dayData.hours.close);
+        const calculatedFacilitySessions = sessionsPerTank * tankCount; // Use DYNAMIC tank count
+        
+        const sessionsToSend = newStatus === DAY_STATUS.CLOSED ? 0 : calculatedFacilitySessions;
+
+        try {
+            await apiService.updateFacilityStatus(
+                dayData.date, 
+                newStatus, 
+                dayData.hours.open, 
+                dayData.hours.close,
+                sessionsToSend // SENDING THE CALCULATED COUNT
+            );
+            
+            fetchCalendarData(); 
+        } catch (e) {
+            console.error("Failed to toggle status:", e);
+        }
+    };
+
+
+    const getStatusColor = (status: DayStatus): string => {
+        switch (status) {
+            case DAY_STATUS.BOOKABLE:
+                return 'bg-green-100 text-green-700 hover:bg-green-200';
+            case DAY_STATUS.CLOSED:
+                return 'bg-red-100 text-red-700 hover:bg-red-200';
+            case DAY_STATUS.SOLD_OUT:
+                return 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200';
+            default:
+                return 'bg-gray-100 text-gray-700';
+        }
+    };
+
+    // Generate the list of dates for the table headers
+    const dates = useMemo(() => {
+        if (!startDate || !endDate) return [];
+        const days: Date[] = [];
+        let currentDate = _startOfDay(startDate);
+        const end = _endOfDay(endDate);
+
+        while (currentDate.getTime() < end.getTime()) {
+            days.push(currentDate);
+            currentDate = _addDays(currentDate, 1);
+        }
+        return days;
+    }, [startDate, endDate]);
+
+    const daysCount = dates.length;
+
+    const getCellWidth = (): string => {
+        if (daysCount <= 7) return 'w-32';
+        if (daysCount <= 14) return 'w-24';
+        return 'w-20';
+    };
+
 
     return (
         <div className="min-h-screen bg-gray-50 font-sans antialiased">
@@ -929,7 +740,7 @@ const App: React.FC = () => {
                             <CalendarIcon className="h-7 w-7 mr-3 text-blue-600" />
                             Tank Reservation Calendar
                         </h1>
-                        <p className="text-sm text-gray-500 mt-1">Manage availability and bookings for your floating therapy pods.</p>
+                        <p className="text-sm text-gray-500 mt-1">Manage availability and bookings for your floating therapy pods (Facility-Wide View).</p>
                     </div>
                     
                     {/* Date Navigation and Display */}
@@ -959,30 +770,152 @@ const App: React.FC = () => {
                 </div>
             </div>
 
-            {/* Calendar Content Area */}
+            {/* Calendar Content Area (Single Table) */}
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
                 {loading ? (
                     <div className="text-center py-20 text-xl font-medium text-gray-500">
-                        <span className="animate-pulse">Loading schedules...</span>
-                    </div>
-                ) : !startDate || !endDate ? (
-                    <p className="text-center py-20 text-lg text-gray-500">Date range is invalid. Please refresh the page.</p>
-                ) : tanks.length > 0 ? ( 
-                    <div className="space-y-10">
-                        {tanks.map(tank => ( 
-                            <TankTypeCalendar 
-                                key={tank._id}
-                                tank={tank}
-                                startDate={startDate}
-                                endDate={endDate}
-                                onDataUpdate={fetchCalendarData}
-                            />
-                        ))}
+                        <span className="animate-pulse">Loading tanks and schedules...</span>
                     </div>
                 ) : (
-                    <p className="text-center py-20 text-lg text-gray-500">No floating tanks found or failed to load schedule data.</p>
+                    <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+                        <div className="p-4 flex justify-between items-center border-b">
+                             <h2 className="text-xl font-bold text-gray-800 flex items-center">
+                                 <Zap className="h-5 w-5 mr-2 text-blue-500" />
+                                 Facility Calendar View ({tankCount} Tanks Combined)
+                             </h2>
+                        </div>
+                        
+                        <div className="overflow-x-auto relative">
+                            <table className="min-w-full divide-y divide-gray-200 border-collapse">
+                                <thead>
+                                    <tr className="bg-gray-50 sticky top-0 z-20">
+                                        <th className="sticky left-0 bg-gray-50 p-3 text-left text-xs font-semibold text-gray-600 uppercase w-32 min-w-[128px] border-r border-gray-200 shadow-inner-right">
+                                            Dates
+                                        </th>
+                                        {dates.map((date, index) => {
+                                            const formattedDate = _format(date, 'MMM dd');
+                                            const dayOfWeek = _format(date, 'EEE');
+                                            const dayData = calendarDays.find(d => d.date === _format(date, 'yyyy-MM-dd')) || {} as FacilityDayData;
+                                            
+                                            return (
+                                                <th
+                                                    key={index}
+                                                    className={`${getCellWidth()} p-2 text-center text-xs font-semibold uppercase cursor-pointer hover:bg-blue-50 transition-colors`}
+                                                    onClick={() => openDaySettings(dayData)} 
+                                                >
+                                                    <div className="text-gray-900 font-bold text-sm">{formattedDate}</div>
+                                                    <div className="text-gray-500">{dayOfWeek}</div>
+                                                </th>
+                                            );
+                                        })}
+                                    </tr>
+                                </thead>
+                                
+                                <tbody>
+                                    
+                                    {/* 1. Facility Status (Bookable/Closed/Sold Out) Row */}
+                                    <tr className="border-t border-gray-200">
+                                        <td className="sticky left-0 bg-white p-3 text-left text-sm font-medium text-gray-800 border-r border-gray-200 shadow-inner-right whitespace-nowrap">
+                                            Tank Status
+                                        </td>
+                                        {calendarDays.map((dayData, index) => {
+                                            const canToggle = dayData.status !== DAY_STATUS.SOLD_OUT;
+
+                                            return (
+                                                <td key={index} className={`${getCellWidth()} p-2 text-center`}>
+                                                    <button
+                                                        onClick={() => dayData.date && canToggle && toggleDayStatus(dayData)}
+                                                        disabled={!dayData.date || !canToggle} 
+                                                        className={`w-full py-1.5 rounded-full text-xs font-semibold transition-colors disabled:opacity-50 ${getStatusColor(dayData.status)}`}
+                                                    >
+                                                        <span className="flex items-center justify-center">
+                                                            {dayData.status === DAY_STATUS.CLOSED && <Lock className="h-3 w-3 mr-1" />}
+                                                            {dayData.status === DAY_STATUS.BOOKABLE && <Unlock className="h-3 w-3 mr-1" />}
+                                                            {dayData.status === DAY_STATUS.SOLD_OUT ? 'SOLD OUT' : dayData.status.toUpperCase()}
+                                                        </span>
+                                                    </button>
+                                                </td>
+                                            );
+                                        })}
+                                    </tr>
+                                    
+                                    {/* --- Open Time Row --- */}
+                                    <tr className="border-t border-gray-100">
+                                        <td className="sticky left-0 bg-white p-3 text-left text-sm font-medium text-gray-800 border-r border-gray-200 shadow-inner-right whitespace-nowrap">
+                                            Open Time
+                                        </td>
+                                        {calendarDays.map((dayData, index) => {
+                                            const timeDisplay = dayData.hours?.open || '-';
+                                            return (
+                                                <td key={`open-${index}`} className={`${getCellWidth()} p-2 text-center text-sm font-medium ${dayData.status === DAY_STATUS.CLOSED ? 'text-gray-400' : 'text-gray-700'}`}>
+                                                    {dayData.status === DAY_STATUS.CLOSED ? '-' : timeDisplay}
+                                                </td>
+                                            );
+                                        })}
+                                    </tr>
+
+                                    {/* --- Close Time Row --- */}
+                                    <tr className="border-t border-gray-100">
+                                        <td className="sticky left-0 bg-white p-3 text-left text-sm font-medium text-gray-800 border-r border-gray-200 shadow-inner-right whitespace-nowrap">
+                                            Close Time
+                                        </td>
+                                        {calendarDays.map((dayData, index) => {
+                                            const timeDisplay = dayData.hours?.close || '-';
+                                            return (
+                                                <td key={`close-${index}`} className={`${getCellWidth()} p-2 text-center text-sm font-medium ${dayData.status === DAY_STATUS.CLOSED ? 'text-gray-400' : 'text-gray-700'}`}>
+                                                    {dayData.status === DAY_STATUS.CLOSED ? '-' : timeDisplay}
+                                                </td>
+                                            );
+                                        })}
+                                    </tr>
+                                    
+                                    {/* 2. Available Sessions Count Row (Total across all tanks) */}
+                                    <tr className="border-t border-gray-200">
+                                        <td className="sticky left-0 bg-white p-3 text-left text-sm font-medium text-gray-800 border-r border-gray-200 shadow-inner-right whitespace-nowrap">
+                                            Available Sessions
+                                        </td>
+                                        {calendarDays.map((dayData, index) => {
+                                            const availableCount = dayData.totalAvailableSessions;
+                                            const isLow = availableCount > 0 && availableCount < tankCount; 
+                                            
+                                            return (
+                                                <td key={index} className={`${getCellWidth()} p-2 text-center text-sm font-semibold ${dayData.status === DAY_STATUS.CLOSED ? 'text-gray-500' : isLow ? 'text-orange-600' : 'text-green-600'}`}>
+                                                    {dayData.status === DAY_STATUS.CLOSED ? '-' : availableCount}
+                                                </td>
+                                            );
+                                        })}
+                                    </tr>
+                                    
+                                    {/* 3. Booked Sessions Count Row (Total across all tanks) */}
+                                    <tr className="border-t border-gray-100">
+                                        <td className="sticky left-0 bg-white p-3 text-left text-sm font-medium text-gray-800 border-r border-gray-200 shadow-inner-right whitespace-nowrap">
+                                            Booked Sessions
+                                        </td>
+                                        {calendarDays.map((dayData, index) => {
+                                            return (
+                                                <td key={index} className={`${getCellWidth()} p-2 text-center text-sm font-semibold text-blue-600`}>
+                                                    {dayData.status === DAY_STATUS.CLOSED ? '-' : dayData.totalBookedSessions}
+                                                </td>
+                                            );
+                                        })}
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
                 )}
             </div>
+
+            {/* Day Settings Sidebar (Only render if open) */}
+            {isSidebarOpen && selectedDayData && (
+                <DaySettingsSidebar
+                    isOpen={isSidebarOpen}
+                    onClose={() => setIsSidebarOpen(false)}
+                    dayData={selectedDayData}
+                    onSave={fetchCalendarData}
+                    tankCount={tankCount}
+                />
+            )}
         </div>
     );
 }

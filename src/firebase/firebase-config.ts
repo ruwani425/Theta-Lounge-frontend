@@ -24,12 +24,12 @@ import type { // Imported as types only
 
 
 const firebaseConfig = {
-  apiKey: "",
-  authDomain: "",
-  projectId: "",
-  storageBucket: "",
-  messagingSenderId: "",
-  appId: ""
+  apiKey: "AIzaSyDPO-w9kD0xAmXjAyZMzxsRAS1yiIHyxIA",
+  authDomain: "theta-lounge.firebaseapp.com",
+  projectId: "theta-lounge",
+  storageBucket: "theta-lounge.firebasestorage.app",
+  messagingSenderId: "909725090196",
+  appId: "1:909725090196:web:957ceb62cd20839fcecf81"
 };
 
 // 2. Initialize Firebase App and Auth
