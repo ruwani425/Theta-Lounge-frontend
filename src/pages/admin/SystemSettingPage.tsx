@@ -24,9 +24,9 @@ const THETA_COLORS = {
 // --- INTERFACE DEFINITION ---
 interface SystemSettingsProps {
   _id?: string; 
-  defaultFloatPrice: number
-  cleaningBuffer: number
-  sessionsPerDay: number
+  defaultFloatPrice: number | string // Allow string for transient empty state
+  cleaningBuffer: number | string   // Allow string for transient empty state
+  sessionsPerDay: number | string   // Allow string for transient empty state
   openTime: string
   closeTime: string
 }
@@ -45,54 +45,74 @@ interface InputFieldProps {
   disabled: boolean
 }
 
-const InputField = memo(({ label, field, type, value, unit, description, onChange, disabled }: InputFieldProps) => (
-  <div className="space-y-2">
-    <label className="block text-sm font-semibold" style={{ color: THETA_COLORS.text }}>
-      {label}
-    </label>
-    <div className="relative">
-      {unit && type === "number" && (
-        <span
-          className="absolute left-3 top-1/2 transform -translate-y-1/2 text-sm font-medium z-10"
-          style={{ color: THETA_COLORS.textLight }}
-        >
-          {unit}
-        </span>
-      )}
-      <input
-        type={type}
-        value={value}
-        disabled={disabled}
-        onChange={(e) => onChange(field, type === "number" ? Number(e.target.value) : e.target.value)}
-        className={`w-full py-2.5 border rounded-lg focus:outline-none transition-all duration-200 ${
-          unit && type === "number" ? "pl-14 pr-4" : "px-4"
-        } ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`}
-        style={{
-          borderColor: THETA_COLORS.gray200,
-          backgroundColor: THETA_COLORS.white,
-          color: THETA_COLORS.text,
-        }}
-        onFocus={(e) => {
-          if (!disabled) {
-            e.currentTarget.style.borderColor = THETA_COLORS.primary
-            e.currentTarget.style.boxShadow = `0 0 0 3px ${THETA_COLORS.primary}20`
-          }
-        }}
-        onBlur={(e) => {
-          if (!disabled) {
-            e.currentTarget.style.borderColor = THETA_COLORS.gray200
-            e.currentTarget.style.boxShadow = "none"
-          }
-        }}
-      />
-    </div>
-    {description && (
-      <p className="text-xs" style={{ color: THETA_COLORS.textLight }}>
-        {description}
-      </p>
-    )}
-  </div>
-))
+const InputField = memo(({ label, field, type, value, unit, description, onChange, disabled }: InputFieldProps) => {
+    
+    // FIX: Update onChange logic to allow empty string for number fields
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const rawValue = e.target.value;
+        
+        if (type === "number") {
+            // If the input is cleared, pass an empty string directly.
+            // Otherwise, convert the value to a number.
+            const processedValue = rawValue === "" ? "" : Number(rawValue);
+            onChange(field, processedValue);
+        } else {
+            onChange(field, rawValue);
+        }
+    };
+
+    // The value prop must be bound to the state, which can now be 0 or ""
+    const inputValue = value === 0 ? '' : value; // Render empty string if state is 0, otherwise use state value
+
+    return (
+      <div className="space-y-2">
+        <label className="block text-sm font-semibold" style={{ color: THETA_COLORS.text }}>
+          {label}
+        </label>
+        <div className="relative">
+          {unit && type === "number" && (
+            <span
+              className="absolute left-3 top-1/2 transform -translate-y-1/2 text-sm font-medium z-10"
+              style={{ color: THETA_COLORS.textLight }}
+            >
+              {unit}
+            </span>
+          )}
+          <input
+            type={type}
+            value={inputValue} // Use the input value helper
+            disabled={disabled}
+            onChange={handleChange} // Use the new handleChange
+            className={`w-full py-2.5 border rounded-lg focus:outline-none transition-all duration-200 ${
+              unit && type === "number" ? "pl-14 pr-4" : "px-4"
+            } ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`}
+            style={{
+              borderColor: THETA_COLORS.gray200,
+              backgroundColor: THETA_COLORS.white,
+              color: THETA_COLORS.text,
+            }}
+            onFocus={(e) => {
+              if (!disabled) {
+                e.currentTarget.style.borderColor = THETA_COLORS.primary
+                e.currentTarget.style.boxShadow = `0 0 0 3px ${THETA_COLORS.primary}20`
+              }
+            }}
+            onBlur={(e) => {
+              if (!disabled) {
+                e.currentTarget.style.borderColor = THETA_COLORS.gray200
+                e.currentTarget.style.boxShadow = "none"
+              }
+            }}
+          />
+        </div>
+        {description && (
+          <p className="text-xs" style={{ color: THETA_COLORS.textLight }}>
+            {description}
+          </p>
+        )}
+      </div>
+    );
+});
 
 InputField.displayName = "InputField"
 
@@ -150,6 +170,8 @@ const SystemSettings = () => {
   // --- HANDLERS ---
   const handleInputChange = useCallback((field: SettingField, value: number | string) => {
     setSettings((prev) => {
+      // If value is "" (meaning the user cleared the number input), store "" in state.
+      // If value is a number, store the number.
       const newSettings = { ...prev, [field]: value } as SystemSettingsProps;
 
       // Check for changes against the initial state (ignoring the _id field)
@@ -165,19 +187,29 @@ const SystemSettings = () => {
 
   const handleSave = async () => {
     if (!hasChanges || isSaving || isLoading) return;
+    
+    // Ensure all number fields are numbers or 0 before sending
+    const finalSettings: SystemSettingsProps = { ...settings };
+    (Object.keys(finalSettings) as Array<keyof SystemSettingsProps>).forEach(key => {
+        // Only process numerical fields (excluding time/string fields)
+        if (typeof finalSettings[key] === 'string' && (key === 'defaultFloatPrice' || key === 'cleaningBuffer' || key === 'sessionsPerDay')) {
+            // Convert empty string back to 0 for database storage
+            finalSettings[key] = (finalSettings[key] === "" ? 0 : finalSettings[key]) as number;
+        }
+    });
 
     try {
       setIsSaving(true);
       
       let savedResponse: any;
       
-      if (settings._id) {
-        // 🛑 FIX: Use apiRequest.put for updating existing records
-        const updateEndpoint = `/system-settings/${settings._id}`;
-        savedResponse = await apiRequest.put<SystemSettingsProps>(updateEndpoint, settings);
+      if (finalSettings._id) {
+        // Use apiRequest.put for updating existing records
+        const updateEndpoint = `/system-settings/${finalSettings._id}`;
+        savedResponse = await apiRequest.put<SystemSettingsProps>(updateEndpoint, finalSettings);
       } else {
         // Use apiRequest.post for creating the initial record
-        savedResponse = await apiRequest.post<SystemSettingsProps>("/system-settings", settings);
+        savedResponse = await apiRequest.post<SystemSettingsProps>("/system-settings", finalSettings);
       }
 
       // The response might be directly the object or wrapped in a data property
@@ -252,17 +284,17 @@ const SystemSettings = () => {
             </div>
           </div>
         </div>
-        
-        {/* Check if data exists or is new */}
-        {!settings._id && !hasChanges && !isLoading && (
-            <div className="mb-6 p-4 rounded-lg border border-opacity-20 flex items-start gap-3" 
-                style={{ backgroundColor: `${THETA_COLORS.warning}15`, borderColor: THETA_COLORS.warning }}>
-                <AlertCircle className="w-5 h-5 mt-0.5 flex-shrink-0" style={{ color: THETA_COLORS.warning }} />
-                <p className="text-sm" style={{ color: THETA_COLORS.warning }}>
-                    **No system settings found in the database.** Enter the default values and click "Save Changes" to create the initial document.
-                </p>
-            </div>
-        )}
+        
+        {/* Check if data exists or is new */}
+        {!settings._id && !hasChanges && !isLoading && (
+            <div className="mb-6 p-4 rounded-lg border border-opacity-20 flex items-start gap-3" 
+                style={{ backgroundColor: `${THETA_COLORS.warning}15`, borderColor: THETA_COLORS.warning }}>
+                <AlertCircle className="w-5 h-5 mt-0.5 flex-shrink-0" style={{ color: THETA_COLORS.warning }} />
+                <p className="text-sm" style={{ color: THETA_COLORS.warning }}>
+                    **No system settings found in the database.** Enter the default values and click "Save Changes" to create the initial document.
+                </p>
+            </div>
+        )}
 
         {/* Status Messages */}
         {saveSuccess && (
@@ -364,7 +396,6 @@ const SystemSettings = () => {
                 type="number"
                 value={settings.cleaningBuffer}
                 unit="min"
-                description="Time between sessions for cleaning"
                 onChange={handleInputChange}
                 disabled={isSaving}
               />
@@ -404,6 +435,7 @@ const SystemSettings = () => {
           </button>
         </div>
       </div>
+      
     </div>
   )
 }
