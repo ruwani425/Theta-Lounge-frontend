@@ -51,6 +51,7 @@ export default function App() {
             <Route path="dashboard" element={<AdminDashboard />} />
             <Route path="tank-management" element={<TankManagementPage />} />
             <Route path="add-tank" element={<AddTankPage />} />
+            <Route path="add-tank/edit/:id" element={<AddTankPage />} /> 
             <Route path="reservations" element={<ReservationsPage />} />
             <Route path="system-settings" element={<SystemSettings/>}/>
             <Route
