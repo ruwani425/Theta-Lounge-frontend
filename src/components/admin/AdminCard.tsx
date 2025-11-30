@@ -1,5 +1,6 @@
 import type { FC } from "react"
 import type { LucideIcon } from "lucide-react"
+import { Link } from "react-router-dom"
 
 interface AdminCardProps {
   title: string
@@ -18,10 +19,10 @@ const THETA_COLORS = {
   white: "#FFFFFF",
   bgLight: "#F5F8FC",
   darkGray: "#1a1a1a",
-  darkestBlue: "#0F1F2E", // Darkest navy from design
-  darkTealBlue: "#1a3a52", // Dark teal-blue from design
-  mediumCyanBlue: "#3a7ca5", // Medium cyan-blue from design
-  lightBlueUpdated: "#6ab4dc", // Light blue from design
+  darkestBlue: "#0F1F2E",
+  darkTealBlue: "#1a3a52",
+  mediumCyanBlue: "#3a7ca5",
+  lightBlueUpdated: "#6ab4dc",
   lightCyan: "#D4F1F9",
   cyan: "#A0E7E5",
 }
@@ -55,8 +56,8 @@ const AdminCard: FC<AdminCardProps> = ({
   const cardBgGradient = `linear-gradient(135deg, #FFFFFF 0%, rgba(106, 180, 220, 0.05) 100%)`
 
   return (
-    <a
-      href={path}
+    <Link
+      to={path}
       className="block p-6 rounded-xl shadow-sm h-full
                  hover:shadow-lg hover:border-blue-300 transition-all duration-300 
                  group relative overflow-hidden animate-fade-in-scale flex flex-col justify-between cursor-pointer
@@ -88,7 +89,10 @@ const AdminCard: FC<AdminCardProps> = ({
           {title}
         </h3>
 
-        <p className="text-sm font-sans leading-relaxed flex-grow" style={{ color: THETA_COLORS.darkBlue }}>
+        <p
+          className="text-sm font-sans leading-relaxed flex-grow"
+          style={{ color: THETA_COLORS.darkBlue }}
+        >
           {description}
         </p>
 
@@ -106,7 +110,7 @@ const AdminCard: FC<AdminCardProps> = ({
           </svg>
         </div>
       </div>
-    </a>
+    </Link>
   )
 }
 

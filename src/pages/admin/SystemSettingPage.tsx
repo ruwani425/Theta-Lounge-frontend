@@ -177,7 +177,8 @@ const SystemSettings = () => {
   const [hasChanges, setHasChanges] = useState(false)
   const [saveSuccess, setSaveSuccess] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
-  const [isLoading, setIsLoading] = useState(true)
+  // FIX 1: Set isLoading to false initially to render immediately
+  const [isLoading, setIsLoading] = useState(false) 
   const [fetchError, setFetchError] = useState<string | null>(null)
 
   // --- CALCULATED VALUE ---
@@ -198,21 +199,22 @@ const SystemSettings = () => {
     // Update the sessionsPerDay field in the state whenever the calculated count changes
     setSettings(prev => {
       if (prev.sessionsPerDay !== calculatedSessionCount) {
-        // Check for changes against the initial state to trigger hasChanges
-        const isDifferentFromInitial = initialSettings.sessionsPerDay !== calculatedSessionCount;
-        if (isDifferentFromInitial) setHasChanges(true); // Trigger changes if calculated differs from saved
+        // Only update the value, do not touch hasChanges here
         return { ...prev, sessionsPerDay: calculatedSessionCount };
       }
       return prev;
     });
-  }, [calculatedSessionCount, initialSettings.sessionsPerDay]);
+  }, [calculatedSessionCount]);
 
 
   // --- DATA FETCHING (GET Request) ---
   useEffect(() => {
+    // Temporarily set isFetching to true, only if we intend to show the spinner later (which we removed), 
+    // but we use it here internally to ensure we don't try to save while data is loading.
     const fetchSettings = async () => {
       try {
-        setIsLoading(true)
+        // We keep this logic internal, but don't bind it to the rendering
+        setIsLoading(true) 
         setFetchError(null)
 
         const response = await apiRequest.get<SystemSettingsProps | null>("/system-settings")
@@ -225,12 +227,16 @@ const SystemSettings = () => {
           setSettings(defaultState)
           setInitialSettings(defaultState)
         }
+        
+        // Ensure hasChanges is explicitly false after loading
+        setHasChanges(false);
 
       } catch (error) {
         console.error("Failed to fetch system settings:", error)
         setFetchError("Failed to load settings. Please ensure the API is running correctly.")
       } finally {
-        setIsLoading(false)
+        // FIX 2: Set isLoading to false after fetch, allowing saving once data is loaded/defaulted
+        setIsLoading(false) 
       }
     }
 
@@ -255,7 +261,7 @@ const SystemSettings = () => {
   }, [initialSettings])
 
   const handleSave = async () => {
-    if (!hasChanges || isSaving || isLoading) return;
+    if (!hasChanges || isSaving || isLoading) return; // Prevent saving if loading/saving/no changes
     
     // Prepare data for the database, converting transient empty strings to 0
     const finalSettings: SystemSettingsProps = { ...settings };
@@ -304,16 +310,9 @@ const SystemSettings = () => {
     }
   }
 
-  // --- CONDITIONAL RENDERING ---
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: THETA_COLORS.lightBg }}>
-        <Loader2 className="w-8 h-8 animate-spin mr-3" style={{ color: THETA_COLORS.primary }} />
-        <p className="text-lg" style={{ color: THETA_COLORS.text }}>**Loading system settings from database...**</p>
-      </div>
-    )
-  }
-
+  // --- CONDITIONAL RENDERING (REMOVED BLOCK) ---
+  // Removed: if (isLoading) { return <Loader2 /> }
+  // We only render the Fetch Error screen if an error occurred during background loading.
   if (fetchError) {
     return (
       <div className="min-h-screen flex items-center justify-center p-8" style={{ backgroundColor: THETA_COLORS.lightBg }}>
