@@ -1,5 +1,5 @@
 "use client"
-import { useState, memo, useCallback, useEffect } from "react"
+import { useState, memo, useCallback, useEffect, useMemo } from "react"
 import { Save, RotateCcw, CheckCircle, AlertCircle, Loader2, Settings } from "lucide-react"
 import apiRequest from "../../core/axios" // Ensure this path is correct
 
@@ -24,9 +24,10 @@ const THETA_COLORS = {
 // --- INTERFACE DEFINITION ---
 interface SystemSettingsProps {
   _id?: string; 
-  defaultFloatPrice: number | string // Allow string for transient empty state
-  cleaningBuffer: number | string   // Allow string for transient empty state
-  sessionsPerDay: number | string   // Allow string for transient empty state
+  defaultFloatPrice: number | string 
+  cleaningBuffer: number | string
+  sessionDuration: number | string // Included in interface
+  sessionsPerDay: number | string  
   openTime: string
   closeTime: string
 }
@@ -42,18 +43,17 @@ interface InputFieldProps {
   unit?: string
   description?: string
   onChange: (field: SettingField, value: number | string) => void
-  disabled: boolean
+  disabled: boolean // Used for saving/loading state
+  readOnly?: boolean // Used for calculated field
 }
 
-const InputField = memo(({ label, field, type, value, unit, description, onChange, disabled }: InputFieldProps) => {
+const InputField = memo(({ label, field, type, value, unit, description, onChange, disabled, readOnly = false }: InputFieldProps) => {
     
-    // FIX: Update onChange logic to allow empty string for number fields
+    // Handles input change for number fields to allow temporary empty string
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const rawValue = e.target.value;
         
         if (type === "number") {
-            // If the input is cleared, pass an empty string directly.
-            // Otherwise, convert the value to a number.
             const processedValue = rawValue === "" ? "" : Number(rawValue);
             onChange(field, processedValue);
         } else {
@@ -61,8 +61,10 @@ const InputField = memo(({ label, field, type, value, unit, description, onChang
         }
     };
 
-    // The value prop must be bound to the state, which can now be 0 or ""
-    const inputValue = value === 0 ? '' : value; // Render empty string if state is 0, otherwise use state value
+    // Renders empty string if state is 0 for number inputs, allowing deletion
+    const inputValue = (type === 'number' && value === 0) ? '' : value; 
+
+    const isInputDisabled = disabled || readOnly;
 
     return (
       <div className="space-y-2">
@@ -80,25 +82,26 @@ const InputField = memo(({ label, field, type, value, unit, description, onChang
           )}
           <input
             type={type}
-            value={inputValue} // Use the input value helper
+            value={inputValue} 
             disabled={disabled}
-            onChange={handleChange} // Use the new handleChange
-            className={`w-full py-2.5 border rounded-lg focus:outline-none transition-all duration-200 ${
-              unit && type === "number" ? "pl-14 pr-4" : "px-4"
-            } ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`}
+            readOnly={readOnly} // Apply readOnly here
+            onChange={handleChange}
+            className={`w-full py-2.5 border rounded-lg focus:outline-none transition-all duration-200 
+              ${unit && type === "number" ? "pl-14 pr-4" : "px-4"} 
+              ${isInputDisabled ? 'opacity-60 cursor-not-allowed bg-gray-50' : ''}`}
             style={{
               borderColor: THETA_COLORS.gray200,
-              backgroundColor: THETA_COLORS.white,
+              backgroundColor: isInputDisabled ? THETA_COLORS.gray100 : THETA_COLORS.white, // Custom style for readonly look
               color: THETA_COLORS.text,
             }}
             onFocus={(e) => {
-              if (!disabled) {
+              if (!isInputDisabled) {
                 e.currentTarget.style.borderColor = THETA_COLORS.primary
                 e.currentTarget.style.boxShadow = `0 0 0 3px ${THETA_COLORS.primary}20`
               }
             }}
             onBlur={(e) => {
-              if (!disabled) {
+              if (!isInputDisabled) {
                 e.currentTarget.style.borderColor = THETA_COLORS.gray200
                 e.currentTarget.style.boxShadow = "none"
               }
@@ -110,18 +113,60 @@ const InputField = memo(({ label, field, type, value, unit, description, onChang
             {description}
           </p>
         )}
-      </div>
+        </div>
     );
 });
 
 InputField.displayName = "InputField"
+
+// --- UTILITY FUNCTION FOR CALCULATION ---
+
+/**
+ * Calculates the maximum number of full sessions that can fit between open and close times.
+ * This simulates the sequential booking process: [Session Duration] followed by [Cleaning Buffer].
+ * The calculation is equivalent to: Floor((Total Operational Time) / (Duration + Buffer)).
+ * * @param openTime 'HH:MM'
+ * @param closeTime 'HH:MM'
+ * @param duration Session duration in minutes
+ * @param buffer Cleaning buffer in minutes
+ * @returns Calculated sessions (integer, floored)
+ */
+const calculateSessionsPerDay = (openTime: string, closeTime: string, duration: number, buffer: number): number => {
+    // 1. Time string to minutes from midnight
+    const timeToMinutes = (time: string): number => {
+        const [hours, minutes] = time.split(':').map(Number);
+        if (isNaN(hours) || isNaN(minutes)) return 0;
+        return hours * 60 + minutes;
+    };
+
+    const openMinutes = timeToMinutes(openTime);
+    let closeMinutes = timeToMinutes(closeTime);
+
+    // If close time is earlier than open time, assume it wraps into the next day (e.g., 22:00 to 06:00)
+    if (closeMinutes <= openMinutes) {
+        closeMinutes += 24 * 60; 
+    }
+    
+    const totalOperatingMinutes = closeMinutes - openMinutes;
+    const sessionLength = duration + buffer; // Total time slot length
+
+    // Check for invalid data (e.g., zero duration or buffer)
+    if (sessionLength <= 0 || totalOperatingMinutes <= 0 || isNaN(totalOperatingMinutes) || isNaN(sessionLength)) {
+        return 0;
+    }
+
+    // Return only full, completed sessions
+    return Math.floor(totalOperatingMinutes / sessionLength);
+};
+
 
 // --- MAIN COMPONENT ---
 const SystemSettings = () => {
   // 1. Define the default state for a brand new, unsaved document
   const defaultState: SystemSettingsProps = {
     defaultFloatPrice: 0,
-    cleaningBuffer: 0,
+    cleaningBuffer: 15,
+    sessionDuration: 60, // NEW DEFAULT
     sessionsPerDay: 0,
     openTime: "09:00",
     closeTime: "21:00",
@@ -135,6 +180,34 @@ const SystemSettings = () => {
   const [isLoading, setIsLoading] = useState(true)
   const [fetchError, setFetchError] = useState<string | null>(null)
 
+  // --- CALCULATED VALUE ---
+  const calculatedSessionCount = useMemo(() => {
+    // Extract current values, ensuring they are treated as numbers (0 if blank/invalid string)
+    const duration = Number(settings.sessionDuration) || 0;
+    const buffer = Number(settings.cleaningBuffer) || 0;
+    
+    // Time strings are always strings
+    const openTime = settings.openTime;
+    const closeTime = settings.closeTime;
+
+    return calculateSessionsPerDay(openTime, closeTime, duration, buffer);
+  }, [settings.openTime, settings.closeTime, settings.sessionDuration, settings.cleaningBuffer]);
+
+  // --- EFFECT TO UPDATE CALCULATED FIELD IN STATE ---
+  useEffect(() => {
+    // Update the sessionsPerDay field in the state whenever the calculated count changes
+    setSettings(prev => {
+      if (prev.sessionsPerDay !== calculatedSessionCount) {
+        // Check for changes against the initial state to trigger hasChanges
+        const isDifferentFromInitial = initialSettings.sessionsPerDay !== calculatedSessionCount;
+        if (isDifferentFromInitial) setHasChanges(true); // Trigger changes if calculated differs from saved
+        return { ...prev, sessionsPerDay: calculatedSessionCount };
+      }
+      return prev;
+    });
+  }, [calculatedSessionCount, initialSettings.sessionsPerDay]);
+
+
   // --- DATA FETCHING (GET Request) ---
   useEffect(() => {
     const fetchSettings = async () => {
@@ -142,16 +215,13 @@ const SystemSettings = () => {
         setIsLoading(true)
         setFetchError(null)
 
-        // Using the confirmed backend endpoint and generic type for potentially null response
         const response = await apiRequest.get<SystemSettingsProps | null>("/system-settings")
 
-        // If response is NOT null (document exists in DB), use it to populate the form
         if (response) {
           const dataToUse: SystemSettingsProps = response as SystemSettingsProps;
           setSettings(dataToUse)
           setInitialSettings(dataToUse)
         } else {
-          // If response is null (no document in DB yet), keep the defaultState
           setSettings(defaultState)
           setInitialSettings(defaultState)
         }
@@ -170,14 +240,13 @@ const SystemSettings = () => {
   // --- HANDLERS ---
   const handleInputChange = useCallback((field: SettingField, value: number | string) => {
     setSettings((prev) => {
-      // If value is "" (meaning the user cleared the number input), store "" in state.
-      // If value is a number, store the number.
+      // Create new settings object based on input change
       const newSettings = { ...prev, [field]: value } as SystemSettingsProps;
-
-      // Check for changes against the initial state (ignoring the _id field)
-      const hasChanged = Object.keys(defaultState).some(key => {
-        return newSettings[key as SettingField] !== initialSettings[key as SettingField];
-      });
+      
+      // Calculate changes based on editable fields only
+      const hasChanged = (Object.keys(defaultState) as Array<keyof SystemSettingsProps>)
+        .filter(key => key !== 'sessionsPerDay') // Exclude calculated field from direct change check
+        .some(key => newSettings[key] !== initialSettings[key]);
 
       setHasChanges(hasChanged);
       setSaveSuccess(false);
@@ -187,16 +256,18 @@ const SystemSettings = () => {
 
   const handleSave = async () => {
     if (!hasChanges || isSaving || isLoading) return;
-    
-    // Ensure all number fields are numbers or 0 before sending
-    const finalSettings: SystemSettingsProps = { ...settings };
-    (Object.keys(finalSettings) as Array<keyof SystemSettingsProps>).forEach(key => {
-        // Only process numerical fields (excluding time/string fields)
-        if (typeof finalSettings[key] === 'string' && (key === 'defaultFloatPrice' || key === 'cleaningBuffer' || key === 'sessionsPerDay')) {
-            // Convert empty string back to 0 for database storage
-            finalSettings[key] = (finalSettings[key] === "" ? 0 : finalSettings[key]) as number;
-        }
-    });
+    
+    // Prepare data for the database, converting transient empty strings to 0
+    const finalSettings: SystemSettingsProps = { ...settings };
+    (Object.keys(finalSettings) as Array<keyof SystemSettingsProps>).forEach(key => {
+        // Convert numerical string fields (which might be "") to 0 or their number value
+        if (typeof finalSettings[key] === 'string' && (key === 'defaultFloatPrice' || key === 'cleaningBuffer' || key === 'sessionDuration')) {
+            // This ensures sessionDuration is converted to a number/0 before saving (POST/PUT)
+            finalSettings[key] = (finalSettings[key] === "" ? 0 : Number(finalSettings[key])) as number;
+        }
+    });
+    // Ensure sessionsPerDay is explicitly stored as the calculated number
+    finalSettings.sessionsPerDay = calculatedSessionCount; 
 
     try {
       setIsSaving(true);
@@ -204,15 +275,12 @@ const SystemSettings = () => {
       let savedResponse: any;
       
       if (finalSettings._id) {
-        // Use apiRequest.put for updating existing records
         const updateEndpoint = `/system-settings/${finalSettings._id}`;
         savedResponse = await apiRequest.put<SystemSettingsProps>(updateEndpoint, finalSettings);
       } else {
-        // Use apiRequest.post for creating the initial record
         savedResponse = await apiRequest.post<SystemSettingsProps>("/system-settings", finalSettings);
       }
 
-      // The response might be directly the object or wrapped in a data property
       const updatedSettings = savedResponse.data || savedResponse;
       setInitialSettings(updatedSettings); 
       setSettings(updatedSettings); 
@@ -273,8 +341,8 @@ const SystemSettings = () => {
           <div className="flex items-center gap-4 mb-4">
             <div className="p-3 rounded-full" style={{ backgroundColor: THETA_COLORS.primary }}>
               <Settings className="w-6 h-6 text-white" />
-            </div>
-            <div>
+              </div>
+              <div>
               <h1 className="text-3xl font-bold" style={{ color: THETA_COLORS.primaryDark }}>
                 System Settings
               </h1>
@@ -355,15 +423,30 @@ const SystemSettings = () => {
             <div className="flex items-center gap-3 mb-6">
               <h2 className="text-lg font-semibold" style={{ color: THETA_COLORS.primaryDark }}>Capacity</h2>
             </div>
+            {/* Session Duration (New Editable Field) */}
             <InputField
-              label="Max Sessions Per Day"
-              field="sessionsPerDay"
+              label="Float Session Duration"
+              field="sessionDuration"
               type="number"
-              value={settings.sessionsPerDay}
-              description="Maximum bookings allowed per tank daily"
+              value={settings.sessionDuration}
+              unit="min"
+              description="The duration of a single floating session"
               onChange={handleInputChange}
               disabled={isSaving}
             />
+            {/* Max Sessions Per Day (Read-Only/Calculated Field) */}
+            <div className="mt-6">
+              <InputField
+                label="Max Sessions Per Day for one tank (Calculated)" // CHANGED TEXT HERE
+                field="sessionsPerDay"
+                type="number"
+                value={calculatedSessionCount} // Bind to the calculated count
+                description="Calculated based on operating hours, session duration, and buffer."
+                onChange={() => {}} // Dummy onChange since it's readOnly
+                disabled={isSaving}
+                readOnly={true} // Set as read-only
+              />
+            </div>
           </div>
 
           {/* Operating Hours Section */}
@@ -396,10 +479,12 @@ const SystemSettings = () => {
                 type="number"
                 value={settings.cleaningBuffer}
                 unit="min"
+                description="Time between sessions for cleaning"
                 onChange={handleInputChange}
                 disabled={isSaving}
               />
             </div>
+            
           </div>
         </div>
 
