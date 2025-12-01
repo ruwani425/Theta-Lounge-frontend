@@ -71,7 +71,8 @@ const THEME_COLORS: { [key: string]: string } = {
     '--theta-blue-dark': '#0873A1',
     '--light-blue-50': '#F0F8FF',
     '--light-blue-200': '#94CCE7',
-    '--theta-red': '#EF4444',
+    '--theta-red': '#EF4444', 
+    '--theta-orange': '#F59E0B', // SOLD OUT
     '--theta-green': '#10B981',
     '--dark-blue-800': '#003F5C',
     '--accent-color': '#2DA0CC',
@@ -163,16 +164,13 @@ const apiService = {
     
     getCalendarOverrides: async (formattedStartDate: string, formattedEndDate: string): Promise<CalendarDetailFromBackend[]> => {
         try {
-            // response is typed as ApiResponse<CalendarDetailFromBackend[]>
             const apiResponse = await apiRequest.get<ApiResponse<CalendarDetailFromBackend[]>>(CALENDAR_API_BASE_URL, {
                 params: { startDate: formattedStartDate, endDate: formattedEndDate }
             });
             
             if (apiResponse.success && apiResponse.data) {
-                // apiResponse.data is CalendarDetailFromBackend[]
                 return apiResponse.data.map(detail => ({
                     ...detail,
-                    // Ensure bookedSessions defaults safely
                     bookedSessions: (detail as any).bookedSessions ?? 0 
                 }));
             }
@@ -182,6 +180,26 @@ const apiService = {
             return [];
         }
     },
+};
+
+// --- Calendar Legend Component (NEW) ---
+const CalendarLegend: React.FC = () => {
+    const LegendItem: React.FC<{ color: string, label: string }> = ({ color, label }) => (
+        <div className="flex items-center space-x-2">
+            <div className="w-4 h-4 rounded-full" style={{ backgroundColor: color }}></div>
+            <span className="text-sm text-gray-700">{label}</span>
+        </div>
+    );
+
+    return (
+        <div className="flex justify-start space-x-6 mb-6">
+            <LegendItem color={THEME_COLORS['--theta-red']} label="Closed (Admin)" />
+            <LegendItem color={THEME_COLORS['--theta-orange']} label="Sold Out" />
+            <LegendItem color={THEME_COLORS['--theta-blue']} label="Today (Available)" />
+            <LegendItem color={THEME_COLORS['--accent-color']} label="Selected Date" />
+            <LegendItem color="#E5E7EB" label="Available" />
+        </div>
+    );
 };
 
 
@@ -224,13 +242,16 @@ const CustomCalendar: React.FC<CustomCalendarProps> = ({ currentDate, onDateChan
         const isSelected = isSameDay(date, selectedDate);
         const isTodayMarker = isToday(date);
         
-        // Only marks closed based on explicit status
-        const isClosed = override?.status === DAY_STATUS.CLOSED;
+        const status = override?.status;
 
         if (isSelected) {
             return `${baseClasses} bg-[var(--accent-color)] text-white shadow-lg border-2 border-white`;
-        } else if (isClosed) {
-            return `${baseClasses} bg-red-500 text-white shadow-md`;
+        } else if (status === DAY_STATUS.CLOSED) {
+            // Use red for CLOSED
+            return `${baseClasses} bg-[var(--theta-red)] text-white shadow-md`;
+        } else if (status === DAY_STATUS.SOLD_OUT) {
+             // Use orange for SOLD OUT
+            return `${baseClasses} bg-[var(--theta-orange)] text-white shadow-md`; 
         } else if (isTodayMarker) {
             return `${baseClasses} bg-[var(--theta-blue)] text-white shadow-md`;
         } else {
@@ -263,7 +284,8 @@ const CustomCalendar: React.FC<CustomCalendarProps> = ({ currentDate, onDateChan
                     const isCurrentMonth = date.getMonth() === currentDate.getMonth();
                     const isPastDate = date < new Date(new Date().setHours(0, 0, 0, 0));
                     
-                    const isClickable = isCurrentMonth && !isPastDate;
+                    // Allow clicks for all non-past, current month dates.
+                    const isClickable = isCurrentMonth && !isPastDate; 
 
                     return (
                         <div key={index} className="flex items-center justify-center p-1">
@@ -271,7 +293,7 @@ const CustomCalendar: React.FC<CustomCalendarProps> = ({ currentDate, onDateChan
                                 type="button"
                                 className={getTileClass(date)}
                                 onClick={() => isClickable && onDateChange(date)}
-                                disabled={!isClickable}
+                                disabled={!isClickable} 
                             >
                                 {date.getDate()}
                             </button>
@@ -301,29 +323,38 @@ const EventSidebar: React.FC<EventSidebarProps> = ({ selectedDate, dayOverrides,
     const effectiveOpenTime = override?.openTime || defaultHours.openTime;
     const effectiveCloseTime = override?.closeTime || defaultHours.closeTime;
 
-    const operationalHours = override?.status !== DAY_STATUS.CLOSED 
-        ? `${effectiveOpenTime} - ${effectiveCloseTime}`
-        : 'CLOSED';
-
     const sessionsToSell = override?.sessionsToSell || 0;
     const bookedSessions = override?.bookedSessions || 0;
     const availableSlots = Math.max(0, sessionsToSell - bookedSessions);
     
+    // Determine status by respecting CLOSED and SOLD_OUT overrides
     let dateStatus: DayStatus;
 
     if (override?.status === DAY_STATUS.CLOSED) {
         dateStatus = DAY_STATUS.CLOSED;
+    } else if (override?.status === DAY_STATUS.SOLD_OUT) {
+        dateStatus = DAY_STATUS.SOLD_OUT;
     } else {
         dateStatus = DAY_STATUS.BOOKABLE;
     }
 
     const isClosed = dateStatus === DAY_STATUS.CLOSED;
-    const dateBoxColor = isClosed ? THEME_COLORS['--theta-red'] : THEME_COLORS['--accent-color'];
+    const isSoldOut = dateStatus === DAY_STATUS.SOLD_OUT;
+    const isClosedOrSoldOut = isClosed || isSoldOut;
+    
+    const operationalHours = dateStatus !== DAY_STATUS.CLOSED 
+        ? `${effectiveOpenTime} - ${effectiveCloseTime}`
+        : 'CLOSED';
+
+    // Use dynamic color for date box based on specific status
+    const dateBoxColor = isClosed ? THEME_COLORS['--theta-red'] : 
+                         isSoldOut ? THEME_COLORS['--theta-orange'] : 
+                         THEME_COLORS['--accent-color'];
     
     const sessions = [
-        { label: 'Available Sessions', value: `${availableSlots} slots`, status: (isClosed || availableSlots === 0) ? 'full' : 'available' },
+        { label: 'Available Sessions', value: `${availableSlots} slots`, status: (isClosedOrSoldOut || availableSlots === 0) ? 'full' : 'available' },
         
-        { label: 'Closed Status', value: dateStatus === DAY_STATUS.CLOSED ? 'Yes' : 'No', status: dateStatus === DAY_STATUS.CLOSED ? 'full' : 'open' },
+        { label: 'Status', value: dateStatus.toUpperCase(), status: isClosedOrSoldOut ? 'full' : 'open' },
         
         { label: 'Open and Close Time', value: operationalHours, status: 'info' },
         { label: 'Total Session Count', value: `${sessionsToSell} sessions`, status: 'full' },
@@ -338,12 +369,19 @@ const EventSidebar: React.FC<EventSidebarProps> = ({ selectedDate, dayOverrides,
             case 'open':
                 return 'text-green-600 border-green-300 bg-green-50'; 
             case 'full':
-                return 'text-red-600 border-red-300 bg-red-50'; 
+                // Use orange text for sold out status displayed in sidebar
+                return isSoldOut ? 'text-orange-600 border-orange-300 bg-orange-50' : 'text-red-600 border-red-300 bg-red-50';
             case 'info':
             default:
                 return 'text-gray-700'; 
         }
     };
+    
+    // Use dynamic color for the status text
+    const statusTextColor = isClosed ? 'text-[var(--theta-red)]' : 
+                            isSoldOut ? 'text-[var(--theta-orange)]' : 
+                            'text-[var(--theta-green)]';
+
 
     return (
         <div className="w-full max-w-sm ml-auto space-y-4 pt-1">
@@ -358,7 +396,7 @@ const EventSidebar: React.FC<EventSidebarProps> = ({ selectedDate, dayOverrides,
                 
                 <div className="flex items-center pt-1 text-sm">
                     <span className="text-gray-500 mr-1">Status:</span>
-                    <span className={`font-bold ${isClosed ? 'text-[var(--theta-red)]' : 'text-[var(--theta-green)]'}`}>{dateStatus.toUpperCase()}</span>
+                    <span className={`font-bold ${statusTextColor}`}>{dateStatus.toUpperCase()}</span>
                 </div>
             </div>
 
@@ -413,16 +451,13 @@ const ConsolidatedBookingForm: React.FC = () => {
         const formattedEndDate = formatDateToKey(endOfMonth);     
         
         try {
-            // Fetch System Settings (Defaults) and Calendar Overrides
             const [settings, overrides] = await Promise.all([
                 apiService.getSystemSettings(),
                 apiService.getCalendarOverrides(formattedStartDate, formattedEndDate)
             ]);
 
-            // Set the dynamic system settings
             setDefaultHours(settings);
             
-            // Map overrides for quick lookup
             const overridesMap = overrides.reduce((acc, curr) => {
                 acc[curr.date] = curr;
                 return acc;
@@ -438,7 +473,6 @@ const ConsolidatedBookingForm: React.FC = () => {
     }, []);
 
     useEffect(() => {
-        // Fetch data whenever the current month changes
         fetchCalendarData(currentMonth);
     }, [currentMonth, fetchCalendarData]);
 
@@ -466,14 +500,20 @@ const ConsolidatedBookingForm: React.FC = () => {
             return;
         }
 
-        const dateStatus: DayStatus = override?.status === DAY_STATUS.CLOSED
-            ? DAY_STATUS.CLOSED
-            : DAY_STATUS.BOOKABLE;
+        // Determine status for validation
+        let dateStatus: DayStatus;
+        if (override?.status === DAY_STATUS.CLOSED) {
+            dateStatus = DAY_STATUS.CLOSED;
+        } else if (override?.status === DAY_STATUS.SOLD_OUT) {
+            dateStatus = DAY_STATUS.SOLD_OUT;
+        } else {
+            dateStatus = DAY_STATUS.BOOKABLE;
+        }
         
-        const isClosed = dateStatus === DAY_STATUS.CLOSED;
+        const isUnavailable = dateStatus === DAY_STATUS.CLOSED || dateStatus === DAY_STATUS.SOLD_OUT;
         
-        if (isClosed) {
-            setMessage('The selected date is explicitly closed. Please choose another date.');
+        if (isUnavailable) {
+            setMessage(`The selected date is currently ${dateStatus.toUpperCase()}. Please choose another date.`);
             return;
         }
         
@@ -495,36 +535,29 @@ const ConsolidatedBookingForm: React.FC = () => {
                 specialNote: specialNote,
             };
             
-            // Correctly type the response for TypeScript safety
             const response = await apiRequest.post<AppointmentApiResponse>('/appointments', bookingData); 
 
             if (response.success) {
                 setIsSubmitting(false);
-                // Safely access _id from the data field
                 const confirmationId = response.data?._id || 'N/A'; 
                 setSuccessMessage(`Appointment confirmed on ${selectedDate!.toLocaleDateString()} at ${selectedTime}. Confirmation ID: ${confirmationId}`);
                 setMessage(null); 
                 
-                // Clear form state
                 setSelectedTime('');
                 setSelectedDate(null);
                 setContactNumber('');
                 setEmail('');
                 setSpecialNote('');
 
-                // Re-fetch calendar data to reflect the newly booked session immediately
-                // Note: The previous logic relied on local state refresh, but fetching data is safer.
                 fetchCalendarData(currentMonth);
 
             } else {
                 setIsSubmitting(false);
-                // Accessing message property on the typed response object
                 setMessage(response.message || 'Booking failed: Server rejected the request.');
             }
 
         } catch (error: any) {
             setIsSubmitting(false);
-            // Handling network errors
             const errorMessage = error.response?.data?.message || 'A network error occurred while trying to book.';
             setMessage(errorMessage);
             console.error('Booking submission error:', error);
@@ -539,21 +572,20 @@ const ConsolidatedBookingForm: React.FC = () => {
         const dateKey = formatDateToKey(selectedDate); 
         const override = dayOverrides[dateKey];
 
-        // 1. Determine Operational Hours: Override first, then Default
         const effectiveOpenTime = override?.openTime || defaultHours.openTime;
         const effectiveCloseTime = override?.closeTime || defaultHours.closeTime;
         
-        // 2. Check if the day is closed
+        // Check if the day is closed or sold out
         const status = override?.status || DAY_STATUS.BOOKABLE;
 
-        if (status === DAY_STATUS.CLOSED) return [];
+        if (status === DAY_STATUS.CLOSED || status === DAY_STATUS.SOLD_OUT) return [];
         
-        // 3. Generate time slots based on dynamic system settings
+        // Generate time slots based on dynamic system settings
         const slots = generateTimeSlots(
             effectiveOpenTime, 
             effectiveCloseTime, 
             defaultHours.sessionDuration, 
-            defaultHours.cleaningBuffer   
+            defaultHours.cleaningBuffer   
         );
         
         return slots;
@@ -566,6 +598,7 @@ const ConsolidatedBookingForm: React.FC = () => {
             --theta-blue: ${THEME_COLORS['--theta-blue']};
             --theta-red: ${THEME_COLORS['--theta-red']};
             --theta-green: ${THEME_COLORS['--theta-green']};
+            --theta-orange: ${THEME_COLORS['--theta-orange']};
             --light-blue-200: ${THEME_COLORS['--light-blue-200']};
             --light-blue-50: ${THEME_COLORS['--light-blue-50']};
             --dark-blue-800: ${THEME_COLORS['--dark-blue-800']};
@@ -605,15 +638,12 @@ const ConsolidatedBookingForm: React.FC = () => {
 
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                     
-                    <div className="absolute top-0 right-0 p-4 space-x-4 text-sm font-semibold text-gray-600">
-                        <span className="hover:text-[var(--accent-color)] transition cursor-pointer">Meetings</span>
-                        <span className="hover:text-[var(--accent-color)] transition cursor-pointer">Events</span>
-                        <span className="hover:text-[var(--accent-color)] transition cursor-pointer">Petitions</span>
-                    </div>
-
-                    <h1 className="text-4xl font-serif font-bold text-[var(--dark-blue-800)] mb-10 text-center">
+                    <h1 className="text-4xl font-serif font-bold text-[var(--dark-blue-800)] mb-6 text-center">
                         Make an Appointment
                     </h1>
+                    
+                    {/* NEW: Calendar Legend */}
+                    <CalendarLegend />
 
                     <div className="grid grid-cols-1 lg:grid-cols-4 gap-x-10 mb-12 border border-gray-100 rounded-lg shadow-md p-6">
                         
@@ -676,10 +706,10 @@ const ConsolidatedBookingForm: React.FC = () => {
                             ) : (
                                 <div className="p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm text-center font-medium">
                                     {selectedDate ? (
-                                        (dayOverrides[formatDateToKey(selectedDate)]?.status === DAY_STATUS.CLOSED)
-                                            ? "We are closed on this date." 
+                                        (dayOverrides[formatDateToKey(selectedDate)]?.status === DAY_STATUS.CLOSED || dayOverrides[formatDateToKey(selectedDate)]?.status === DAY_STATUS.SOLD_OUT)
+                                            ? `We are ${dayOverrides[formatDateToKey(selectedDate)]?.status.toUpperCase()} on this date.` 
                                             : "No available slots on the selected date within operational hours."
-                                    ) : "Please select a date."}
+                                        ) : "Please select a date."}
                                 </div>
                             )}
 
