@@ -9,22 +9,18 @@ import apiRequest from "../core/axios";
 const DAY_STATUS = {
     BOOKABLE: 'Bookable',
     CLOSED: 'Closed',
-    SOLD_OUT: 'Sold Out', // Keeping the definition, but removing usage in logic
+    SOLD_OUT: 'Sold Out', // Keeping the definition, but removed usage in logic
 } as const;
 type DayStatus = typeof DAY_STATUS[keyof typeof DAY_STATUS];
 
-/** * MATCHES ICalendarDetail from your backend, plus bookedSessions which is calculated/returned.
- *
- * NOTE: The backend response structure provided only contains `status: "Bookable"` or `status: "Closed"`.
- * We are removing all derived "Sold Out" logic based on the user request.
- */
+/** * MATCHES ICalendarDetail from your backend. */
 interface CalendarDetailFromBackend {
     date: string; // YYYY-MM-DD
     status: DayStatus;
     openTime?: string; // Optional override time
     closeTime?: string; // Optional override time
     sessionsToSell: number; // Total slots available for the day (across all tanks)
-    bookedSessions: number; // Total slots booked (Used for frontend calculation)
+    bookedSessions: number; // Total slots booked (Used for frontend calculation - defaulting to 0)
 }
 
 /** The overall response structure expected from the backend GET endpoints. */
@@ -39,24 +35,21 @@ interface ApiResponse<T> {
 interface SystemSettings {
     defaultFloatPrice: number;
     cleaningBuffer: number;
+    sessionDuration: number; // NEW: Session duration in minutes
     sessionsPerDay: number;
     openTime: string; 
     closeTime: string; 
 }
 
-// Default settings used as a fallback (Ensuring all properties are present)
+// Default settings used as a fallback
 const GLOBAL_DEFAULTS: SystemSettings = {
     defaultFloatPrice: 0,
-    cleaningBuffer: 30, // Example default
+    cleaningBuffer: 30, // Default in minutes
+    sessionDuration: 60, // Default in minutes (1 hour)
     sessionsPerDay: 8, // Example default
     openTime: '09:00', 
     closeTime: '21:00' 
 };
-
-// --- CORE LOGIC CONSTANTS (90-minute cycle) ---
-const SESSION_DURATION_MINUTES = 60;
-const BREAK_DURATION_MINUTES = 30; 
-const TOTAL_CYCLE_MINUTES = SESSION_DURATION_MINUTES + BREAK_DURATION_MINUTES; // 90 minutes
 
 // --- THEME & UTILITIES ---
 const THEME_COLORS: { [key: string]: string } = {
@@ -98,9 +91,6 @@ const getDaysInMonth = (date: Date): Date[] => {
     return days;
 };
 
-/**
- * FIX: Use local date components for consistent date key generation.
- */
 const formatDateToKey = (date: Date): string => {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -116,9 +106,9 @@ const isSameDay = (date1: Date | null, date2: Date | null): boolean => {
 const isToday = (date: Date): boolean => isSameDay(date, new Date());
 
 /**
- * Generates available session start times based on the 90-minute cycle.
+ * Generates available session start times based on dynamic duration and buffer.
  */
-const generateTimeSlots = (openTime: string, closeTime: string): string[] => {
+const generateTimeSlots = (openTime: string, closeTime: string, sessionDuration: number, cleaningBuffer: number): string[] => {
     const slots: string[] = [];
     const fixedDate = '2000/01/01';
 
@@ -126,14 +116,17 @@ const generateTimeSlots = (openTime: string, closeTime: string): string[] => {
         let current = new Date(`${fixedDate} ${openTime}`);
         const close = new Date(`${fixedDate} ${closeTime}`);
 
-        const cycleDurationMs = TOTAL_CYCLE_MINUTES * 60 * 1000;
-        const sessionDurationMs = SESSION_DURATION_MINUTES * 60 * 1000;
+        // Calculate cycle duration dynamically
+        const SESSION_DURATION_MS = sessionDuration * 60 * 1000;
+        const TOTAL_CYCLE_MS = (sessionDuration + cleaningBuffer) * 60 * 1000;
 
-        while (current.getTime() + sessionDurationMs <= close.getTime()) {
+        // The session must finish *before* the close time
+        while (current.getTime() + SESSION_DURATION_MS <= close.getTime()) {
             const timeString = current.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
             slots.push(timeString);
             
-            current = new Date(current.getTime() + cycleDurationMs);
+            // Move to the next slot start time (session duration + cleaning buffer)
+            current = new Date(current.getTime() + TOTAL_CYCLE_MS);
         }
     } catch (e) {
         console.error("Time slot generation error:", e);
@@ -150,7 +143,7 @@ const apiService = {
     getSystemSettings: async (): Promise<SystemSettings> => {
         try {
             const response = await apiRequest.get<ApiResponse<SystemSettings>>(SETTINGS_API_BASE_URL); 
-            
+            // Merge defaults with fetched settings to ensure all required fields are present
             return { ...GLOBAL_DEFAULTS, ...response.data }; 
         } catch (error) {
             console.error("Failed to fetch system settings. Using fallback defaults.", error);
@@ -160,15 +153,18 @@ const apiService = {
     
     getCalendarOverrides: async (formattedStartDate: string, formattedEndDate: string): Promise<CalendarDetailFromBackend[]> => {
         try {
+            // apiResponse is correctly typed as ApiResponse<CalendarDetailFromBackend[]>
             const apiResponse = await apiRequest.get<ApiResponse<CalendarDetailFromBackend[]>>(CALENDAR_API_BASE_URL, {
                 params: { startDate: formattedStartDate, endDate: formattedEndDate }
             });
-
+            
+            // FIX APPLIED HERE: Check the success flag on apiResponse and access the data array via apiResponse.data
             if (apiResponse.success && apiResponse.data) {
+                // apiResponse.data is CalendarDetailFromBackend[]
                 return apiResponse.data.map(detail => ({
                     ...detail,
-                    // Assuming bookedSessions is zero if not provided in the backend response
-                    bookedSessions: detail.bookedSessions ?? 0 
+                    // Use a safe check for bookedSessions
+                    bookedSessions: (detail as any).bookedSessions ?? 0 
                 }));
             }
             return [];
@@ -219,20 +215,15 @@ const CustomCalendar: React.FC<CustomCalendarProps> = ({ currentDate, onDateChan
         const isSelected = isSameDay(date, selectedDate);
         const isTodayMarker = isToday(date);
         
-        // FIX 1: Only mark day as red if the status is explicitly 'Closed' from the database. 
-        // We remove the check for DAY_STATUS.SOLD_OUT or calculated full capacity.
         const isClosed = override?.status === DAY_STATUS.CLOSED;
 
         if (isSelected) {
             return `${baseClasses} bg-[var(--accent-color)] text-white shadow-lg border-2 border-white`;
         } else if (isClosed) {
-            // Day is explicitly marked Closed (Red)
             return `${baseClasses} bg-red-500 text-white shadow-md`;
         } else if (isTodayMarker) {
-            // Only mark today as blue if it is available/bookable.
             return `${baseClasses} bg-[var(--theta-blue)] text-white shadow-md`;
         } else {
-            // All other days are assumed Bookable (Default/White)
             return `${baseClasses} text-gray-700 hover:bg-gray-100`;
         }
     };
@@ -283,6 +274,8 @@ const CustomCalendar: React.FC<CustomCalendarProps> = ({ currentDate, onDateChan
 };
 
 
+// --- Event Sidebar Component ---
+
 interface EventSidebarProps {
     selectedDate: Date | null;
     dayOverrides: Record<string, CalendarDetailFromBackend>;
@@ -295,11 +288,9 @@ const EventSidebar: React.FC<EventSidebarProps> = ({ selectedDate, dayOverrides,
     const dateKey = formatDateToKey(displayDate); 
     const override = dayOverrides[dateKey];
 
-    // Determine effective open/close times (Override first, then Default)
     const effectiveOpenTime = override?.openTime || defaultHours.openTime;
     const effectiveCloseTime = override?.closeTime || defaultHours.closeTime;
 
-    // Determine current hours and status based on override or default
     const operationalHours = override?.status !== DAY_STATUS.CLOSED 
         ? `${effectiveOpenTime} - ${effectiveCloseTime}`
         : 'CLOSED';
@@ -308,28 +299,21 @@ const EventSidebar: React.FC<EventSidebarProps> = ({ selectedDate, dayOverrides,
     const bookedSessions = override?.bookedSessions || 0;
     const availableSlots = Math.max(0, sessionsToSell - bookedSessions);
     
-    // FIX 2: Determine status with new priority (only recognize CLOSED, otherwise BOOKABLE)
     let dateStatus: DayStatus;
 
     if (override?.status === DAY_STATUS.CLOSED) {
-        // Priority 1: If the database explicitly says CLOSED, honor it.
         dateStatus = DAY_STATUS.CLOSED;
     } else {
-        // Priority 2: All other days are Bookable by default, ignoring Sold Out logic.
         dateStatus = DAY_STATUS.BOOKABLE;
     }
 
 
-    // Sidebar Display Properties
     const isClosed = dateStatus === DAY_STATUS.CLOSED;
     const dateBoxColor = isClosed ? THEME_COLORS['--theta-red'] : THEME_COLORS['--accent-color'];
     
     const sessions = [
-        // availableSlots logic remains based on sessionsToSell - bookedSessions
-        // We assume availableSlots > 0 for all non-closed days until capacity tracking is fully implemented
         { label: 'Available Sessions', value: `${availableSlots} slots`, status: (isClosed || availableSlots === 0) ? 'full' : 'available' },
         
-        // This line uses the fixed dateStatus:
         { label: 'Closed Status', value: dateStatus === DAY_STATUS.CLOSED ? 'Yes' : 'No', status: dateStatus === DAY_STATUS.CLOSED ? 'full' : 'open' },
         
         { label: 'Open and Close Time', value: operationalHours, status: 'info' },
@@ -426,6 +410,7 @@ const ConsolidatedBookingForm: React.FC = () => {
                 apiService.getCalendarOverrides(formattedStartDate, formattedEndDate)
             ]);
 
+            // Set the dynamic system settings
             setDefaultHours(settings);
             
             // Map overrides for quick lookup
@@ -472,7 +457,6 @@ const ConsolidatedBookingForm: React.FC = () => {
             return;
         }
 
-        // FIX 3: Simplify pre-submission validation. Only check for explicit CLOSED status.
         const dateStatus: DayStatus = override?.status === DAY_STATUS.CLOSED
             ? DAY_STATUS.CLOSED
             : DAY_STATUS.BOOKABLE;
@@ -484,19 +468,16 @@ const ConsolidatedBookingForm: React.FC = () => {
             return;
         }
         
-        // Check if filteredSlots are empty (meaning no available times based on operating hours)
         if (filteredSlots.length === 0) {
-            setMessage('No available time slots on the selected date within operating hours. Please choose another date.');
+            setMessage('No available time slots on the selected date within operational hours. Please choose another date.');
             return;
         }
-        // END FIX 3
 
         setIsSubmitting(true);
         setMessage('Processing your appointment...');
         setSuccessMessage(null);
 
         // --- Mock API call simulation for booking submission ---
-        // In a real implementation, you would make an API call here.
         await new Promise(resolve => setTimeout(resolve, 2000)); 
         
         setIsSubmitting(false);
@@ -508,24 +489,29 @@ const ConsolidatedBookingForm: React.FC = () => {
     };
 
 
-    // --- Time Slot Calculation Logic (Centralized) ---
+    // --- Time Slot Calculation Logic (Updated to use dynamic settings) ---
     const filteredSlots = useMemo(() => {
         if (!selectedDate || loadingCalendar) return []; 
 
         const dateKey = formatDateToKey(selectedDate); 
         const override = dayOverrides[dateKey];
 
-        // PRIORITIZE OVERRIDE TIMES, FALLBACK TO DEFAULTS
+        // 1. Determine Operational Hours: Override first, then Default
         const effectiveOpenTime = override?.openTime || defaultHours.openTime;
         const effectiveCloseTime = override?.closeTime || defaultHours.closeTime;
         
-        // If the database explicitly marks the day as closed, return no slots.
+        // 2. Check if the day is closed
         const status = override?.status || DAY_STATUS.BOOKABLE;
 
         if (status === DAY_STATUS.CLOSED) return [];
         
-        // Generate time slots based on the dynamic operational hours (90 min cycle)
-        const slots = generateTimeSlots(effectiveOpenTime, effectiveCloseTime);
+        // 3. Generate time slots based on dynamic system settings
+        const slots = generateTimeSlots(
+            effectiveOpenTime, 
+            effectiveCloseTime, 
+            defaultHours.sessionDuration, // Use dynamic session duration
+            defaultHours.cleaningBuffer   // Use dynamic cleaning buffer
+        );
         
         return slots;
     }, [selectedDate, dayOverrides, defaultHours, loadingCalendar]);
@@ -647,10 +633,9 @@ const ConsolidatedBookingForm: React.FC = () => {
                             ) : (
                                 <div className="p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm text-center font-medium">
                                     {selectedDate ? (
-                                        // Display status based on the determined dateStatus in the sidebar logic
                                         (dayOverrides[formatDateToKey(selectedDate)]?.status === DAY_STATUS.CLOSED)
                                             ? "We are closed on this date." 
-                                            : "No available slots on the selected date (Likely outside operational hours or a capacity issue that is not explicitly handled by the backend)."
+                                            : "No available slots on the selected date within operational hours."
                                     ) : "Please select a date."}
                                 </div>
                             )}
