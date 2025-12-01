@@ -1,100 +1,86 @@
 "use client"
-
 import type React from "react"
-
-import { useState } from "react"
-import { Search, Check, Clock, X, CheckCircle, Calendar } from "lucide-react"
+import { useState, useEffect, useCallback } from "react"
+import { Search, Check, Clock, X, CheckCircle, Calendar, MessageSquare, Phone } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 
-interface Booking {
-  id: number
-  clientName: string
-  email: string
-  phone: string
-  sessionDate: string
+// Import your API Request file
+// ⚠️ ADJUST THIS PATH to where you saved your ApiRequest.ts file
+import apiRequest from "../../core/axios" 
+
+// Interface definition based on the required display fields and common API responses
+interface Appointment {
+  id: number // Required for React key
+  clientName: string | null // Displayed, using null for safety
+  email: string | null // Displayed
+  contactNumber: string | null // Displayed
+  // Note: Backend sample uses 'date' and 'time'. Mapped here as sessionDate/Time for clarity.
+  sessionDate: string 
   sessionTime: string
-  duration: string
-  sessionType: string
   status: "confirmed" | "pending" | "completed" | "cancelled"
-  amount: string
+  specialNote: string | null // Displayed
+  // Removed: duration, sessionType, amount
 }
 
 export default function ReservationsPage() {
   const navigate = useNavigate()
   const [searchTerm, setSearchTerm] = useState("")
   const [statusFilter, setStatusFilter] = useState("all")
+  const [appointments, setAppointments] = useState<Appointment[]>([]) 
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  const bookings: Booking[] = [
-    {
-      id: 1,
-      clientName: "Sarah Johnson",
-      email: "sarah@example.com",
-      phone: "+1 (555) 123-4567",
-      sessionDate: "2025-12-15",
-      sessionTime: "10:00 AM",
-      duration: "60 min",
-      sessionType: "Single Float",
-      status: "confirmed",
-      amount: "$70.00",
-    },
-    {
-      id: 2,
-      clientName: "Michael Chen",
-      email: "michael@example.com",
-      phone: "+1 (555) 234-5678",
-      sessionDate: "2025-12-16",
-      sessionTime: "2:00 PM",
-      duration: "60 min",
-      sessionType: "Couples Float",
-      status: "confirmed",
-      amount: "$140.00",
-    },
-    {
-      id: 3,
-      clientName: "Emma Davis",
-      email: "emma@example.com",
-      phone: "+1 (555) 345-6789",
-      sessionDate: "2025-12-17",
-      sessionTime: "11:00 AM",
-      duration: "90 min",
-      sessionType: "Extended Float",
-      status: "pending",
-      amount: "$105.00",
-    },
-    {
-      id: 4,
-      clientName: "James Wilson",
-      email: "james@example.com",
-      phone: "+1 (555) 456-7890",
-      sessionDate: "2025-12-18",
-      sessionTime: "3:30 PM",
-      duration: "60 min",
-      sessionType: "Single Float",
-      status: "cancelled",
-      amount: "$70.00",
-    },
-    {
-      id: 5,
-      clientName: "Lisa Anderson",
-      email: "lisa@example.com",
-      phone: "+1 (555) 567-8901",
-      sessionDate: "2025-12-19",
-      sessionTime: "9:00 AM",
-      duration: "60 min",
-      sessionType: "Single Float",
-      status: "completed",
-      amount: "$70.00",
-    },
-  ]
+  const fetchAppointments = useCallback(async () => {
+    setIsLoading(true)
+    setError(null)
+    try {
+      const endpoint = "/appointments"; 
 
-  const filteredBookings = bookings.filter((booking) => {
+      // Assuming API returns { success: boolean, data: Appointment[] }
+      const responseData = await apiRequest.get<{ success: boolean; data: Appointment[] }>(endpoint);
+      
+      // Map API data if field names differ (e.g., if API uses 'date'/'time' instead of 'sessionDate'/'sessionTime')
+      const mappedAppointments = responseData.data.map(app => ({
+          ...app,
+          // ⚠️ Map your backend 'date' field to 'sessionDate' and 'time' to 'sessionTime'
+          sessionDate: (app as any).date || app.sessionDate,
+          sessionTime: (app as any).time || app.sessionTime,
+      })) as Appointment[];
+
+      setAppointments(mappedAppointments); 
+
+    } catch (err: any) {
+      console.error("Error fetching appointments:", err);
+      setError(`Could not load appointments. Error: ${err.message || 'Unknown error'}`);
+      setAppointments([]); 
+    } finally {
+      setIsLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchAppointments()
+  }, [fetchAppointments])
+
+  // Filtering Logic (with Null Checks for Safety)
+  const filteredAppointments = appointments.filter((appointment) => {
+    
+    // Safely assign properties, defaulting to an empty string to prevent toLowerCase() errors
+    const clientName = appointment.clientName || "";
+    const email = appointment.email || "";
+    const contactNumber = appointment.contactNumber || "";
+    
     const matchesSearch =
-      booking.clientName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      booking.email.toLowerCase().includes(searchTerm.toLowerCase())
-    const matchesStatus = statusFilter === "all" || booking.status === statusFilter
-    return matchesSearch && matchesStatus
-  })
+      clientName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      contactNumber.includes(searchTerm);
+      
+    const matchesStatus = statusFilter === "all" || appointment.status === statusFilter;
+    
+    return !!appointment && matchesSearch && matchesStatus;
+  });
 
+  // Status Badge Logic
   const getStatusBadge = (status: string) => {
     const statusStyles: Record<string, string> = {
       confirmed: "bg-green-50 text-green-700 border-green-200",
@@ -119,7 +105,7 @@ export default function ReservationsPage() {
       <div className="mx-auto max-w-7xl p-6">
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-foreground">Reservations</h1>
+          <h1 className="text-3xl font-bold text-foreground">Reservations 📅</h1>
           <p className="mt-2 text-muted-foreground">Manage and view all client booking sessions</p>
         </div>
 
@@ -130,7 +116,7 @@ export default function ReservationsPage() {
             <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
             <input
               type="text"
-              placeholder="Search by client name or email..."
+              placeholder="Search by client name, email, or contact number..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full rounded-lg border border-input bg-background pl-10 pr-4 py-2 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
@@ -162,59 +148,87 @@ export default function ReservationsPage() {
             </button>
           </div>
         </div>
-
+        
+        {/* Loading and Error States */}
+        {isLoading && (
+          <div className="text-center p-10 text-xl text-primary font-medium">
+            Loading appointments... ⏳
+          </div>
+        )}
+        {error && !isLoading && (
+          <div className="text-center p-10 text-xl text-red-500 font-medium border border-red-300 bg-red-50 rounded-lg">
+            Error: {error} ❌
+          </div>
+        )}
+        
         {/* Bookings Table */}
-        <div className="rounded-lg border border-border bg-card overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border bg-muted">
-                <th className="px-6 py-4 text-left font-semibold text-foreground">Client Name</th>
-                <th className="px-6 py-4 text-left font-semibold text-foreground">Email</th>
-                <th className="px-6 py-4 text-left font-semibold text-foreground">Session Date</th>
-                <th className="px-6 py-4 text-left font-semibold text-foreground">Time</th>
-                <th className="px-6 py-4 text-left font-semibold text-foreground">Session Type</th>
-                <th className="px-6 py-4 text-left font-semibold text-foreground">Status</th>
-                <th className="px-6 py-4 text-left font-semibold text-foreground">Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredBookings.map((booking) => {
-                const { styles, icon } = getStatusBadge(booking.status)
-                return (
-                  <tr key={booking.id} className="border-b border-border hover:bg-muted transition-colors">
-                    <td className="px-6 py-4 font-medium text-foreground">{booking.clientName}</td>
-                    <td className="px-6 py-4 text-muted-foreground">{booking.email}</td>
-                    <td className="px-6 py-4 text-foreground">
-                      {new Date(booking.sessionDate).toLocaleDateString("en-US", {
-                        month: "short",
-                        day: "numeric",
-                        year: "numeric",
-                      })}
-                    </td>
-                    <td className="px-6 py-4 text-foreground">{booking.sessionTime}</td>
-                    <td className="px-6 py-4 text-foreground">{booking.sessionType}</td>
-                    <td className="px-6 py-4">
-                      <div
-                        className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium ${styles}`}
-                      >
-                        {icon}
-                        <span className="capitalize">{booking.status}</span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 font-semibold text-foreground">{booking.amount}</td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
+        {!isLoading && !error && (
+          <div className="rounded-lg border border-border bg-card overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-muted">
+                  <th className="px-6 py-4 text-left font-semibold text-foreground">Client Name</th>
+                  <th className="px-6 py-4 text-left font-semibold text-foreground">Email</th>
+                  <th className="px-6 py-4 text-left font-semibold text-foreground">Contact No.</th>
+                  <th className="px-6 py-4 text-left font-semibold text-foreground">Date</th>
+                  <th className="px-6 py-4 text-left font-semibold text-foreground">Time</th>
+                  {/* Removed: Duration, Session Type, Amount */}
+                  <th className="px-6 py-4 text-left font-semibold text-foreground">Special Note</th> 
+                  <th className="px-6 py-4 text-left font-semibold text-foreground">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredAppointments.map((appointment) => {
+                  const { styles, icon } = getStatusBadge(appointment.status)
+                  return (
+                    <tr key={appointment.id} className="border-b border-border hover:bg-muted transition-colors">
+                      <td className="px-6 py-4 font-medium text-foreground">{appointment.clientName || 'N/A'}</td>
+                      <td className="px-6 py-4 text-muted-foreground">{appointment.email || 'N/A'}</td>
+                      {/* Contact Number Data */}
+                      <td className="px-6 py-4 text-foreground whitespace-nowrap">
+                        <a 
+                          href={`tel:${appointment.contactNumber || ''}`} 
+                          className={`flex items-center gap-1 hover:underline ${appointment.contactNumber ? 'text-primary' : 'text-muted-foreground'}`}
+                        >
+                          <Phone className="h-4 w-4" />
+                          {appointment.contactNumber || 'N/A'}
+                        </a>
+                      </td>
+                      <td className="px-6 py-4 text-foreground">
+                        {appointment.sessionDate ? new Date(appointment.sessionDate).toLocaleDateString("en-US", {
+                          month: "short",
+                          day: "numeric",
+                          year: "numeric",
+                        }) : 'N/A'}
+                      </td>
+                      <td className="px-6 py-4 text-foreground">{appointment.sessionTime || 'N/A'}</td>
+                      {/* Special Note Data */}
+                      <td className="px-6 py-4 text-muted-foreground max-w-xs truncate" title={appointment.specialNote || 'N/A'}>
+                        <MessageSquare className="inline h-4 w-4 mr-1 text-primary" />
+                        {appointment.specialNote || "N/A"}
+                      </td>
+                      <td className="px-6 py-4">
+                        <div
+                          className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium ${styles}`}
+                        >
+                          {icon}
+                          <span className="capitalize">{appointment.status}</span>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
 
         {/* Empty State */}
-        {filteredBookings.length === 0 && (
+        {filteredAppointments.length === 0 && !isLoading && !error && (
           <div className="mt-8 rounded-lg border border-border bg-card p-12 text-center">
             <Calendar className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
             <h3 className="text-lg font-semibold text-foreground">No bookings found</h3>
-            <p className="mt-2 text-muted-foreground">Try adjusting your search or filter criteria</p>
+            <p className="mt-2 text-muted-foreground">There are no appointments to display. Try adjusting the filter.</p>
           </div>
         )}
       </div>
