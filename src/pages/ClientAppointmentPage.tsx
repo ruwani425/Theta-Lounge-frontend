@@ -1,5 +1,4 @@
 "use client"
-
 import type React from "react"
 import { useState, useMemo, useEffect, useCallback } from "react"
 import {
@@ -14,61 +13,65 @@ import {
   ChevronRight,
   Users,
 } from "lucide-react"
-
-import apiRequest from "../core/axios" // Assuming apiRequest is imported from "../core/axios"
+import apiRequest from "../core/axios"
 
 // --- 1. TypeScript Interfaces & Data ---
-
 const DAY_STATUS = {
   BOOKABLE: "Bookable",
-  CLOSED: "Closed", // FIX: Matches the API response casing ("Closed")
+  CLOSED: "Closed",
   SOLD_OUT: "Sold Out",
 } as const
+
 type DayStatus = (typeof DAY_STATUS)[keyof typeof DAY_STATUS]
 
-/** The generic API Response wrapper. */
 interface ApiResponse<T> {
   success: boolean
   data: T
   message?: string
 }
 
-/** Appointment data expected back upon a successful POST request. */
 interface AppointmentResponseData {
-  _id: string // The MongoDB ID of the created appointment
+  _id: string
   date: string
   time: string
-  name: string // Added name field
+  name: string
   email: string
   contactNumber: string
   specialNote?: string
-  status: "Pending" | "Confirmed" | "Canceled"
+  status: "pending" | "completed" | "canceled"
 }
 
-/** Specific response type for the POST /appointments endpoint. */
 interface AppointmentApiResponse extends ApiResponse<AppointmentResponseData | null> {}
 
-/** * MATCHES ICalendarDetail from your backend. */
 interface CalendarDetailFromBackend {
-  date: string // YYYY-MM-DD
+  date: string
   status: DayStatus
-  openTime?: string // Optional override time
-  closeTime?: string // Optional override time
-  sessionsToSell: number // Total slots available for the day
-  bookedSessions: number // Total slots booked (defaults to 0 if null)
+  openTime?: string
+  closeTime?: string
+  sessionsToSell: number
+  bookedSessions: number
 }
 
-/** System Settings used for defaults and calculations. */
 interface SystemSettings {
   defaultFloatPrice: number
-  cleaningBuffer: number;
-  sessionDuration: number | string;
-  sessionsPerDay: number;
-  openTime: string;
-  closeTime: string;
-  numberOfTanks: number;
-  tankStaggerInterval: number;
-  actualCloseTime?: string;
+  cleaningBuffer: number
+  sessionDuration: number | string
+  sessionsPerDay: number
+  openTime: string
+  closeTime: string
+  numberOfTanks: number
+  tankStaggerInterval: number
+  actualCloseTime?: string
+}
+
+interface BookedCountByDate {
+  date: string
+  count: number
+}
+
+interface BookedTimesByDate {
+  date: string
+  times: string[]
 }
 
 // --- THEME & UTILITIES ---
@@ -78,7 +81,7 @@ const THEME_COLORS: { [key: string]: string } = {
   "--light-blue-50": "#F0F8FF",
   "--light-blue-200": "#94CCE7",
   "--theta-red": "#EF4444",
-  "--theta-orange": "#F59E0B", // SOLD OUT
+  "--theta-orange": "#F59E0B",
   "--theta-green": "#10B981",
   "--dark-blue-800": "#003F5C",
   "--accent-color": "#2DA0CC",
@@ -92,23 +95,19 @@ const getDaysInMonth = (date: Date): Date[] => {
   const firstDay = new Date(year, month, 1)
   const lastDay = new Date(year, month + 1, 0)
   const days: Date[] = []
-
   const startDayOfWeek = firstDay.getDay()
   const prevMonth = new Date(year, month, 0)
   for (let i = startDayOfWeek; i > 0; i--) {
     days.unshift(new Date(prevMonth.getFullYear(), prevMonth.getMonth(), prevMonth.getDate() - i + 1))
   }
-
   for (let i = 1; i <= lastDay.getDate(); i++) {
     days.push(new Date(year, month, i))
   }
-
   const remainingSlots = 42 - days.length
   const nextMonth = new Date(year, month + 1, 1)
   for (let i = 0; i < remainingSlots; i++) {
     days.push(new Date(nextMonth.getFullYear(), nextMonth.getMonth(), nextMonth.getDate() + i))
   }
-
   return days
 }
 
@@ -116,7 +115,6 @@ const formatDateToKey = (date: Date): string => {
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, "0")
   const day = String(date.getDate()).padStart(2, "0")
-
   return `${year}-${month}-${day}`
 }
 
@@ -124,11 +122,16 @@ const isSameDay = (date1: Date | null, date2: Date | null): boolean => {
   if (!date1 || !date2) return false
   return date1.toDateString() === date2.toDateString()
 }
+
 const isToday = (date: Date): boolean => isSameDay(date, new Date())
 
-/**
- * Calculate staggered tank sessions - matches CalenderManage.tsx logic
- */
+const hexToRgba = (hex: string, alpha: number): string => {
+  const r = Number.parseInt(hex.slice(1, 3), 16)
+  const g = Number.parseInt(hex.slice(3, 5), 16)
+  const b = Number.parseInt(hex.slice(5, 7), 16)
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+
 const calculateStaggeredSessions = (
   openTime: string,
   closeTime: string,
@@ -141,7 +144,6 @@ const calculateStaggeredSessions = (
   actualCloseTime: string
   totalSessions: number
 } => {
-  // Validate inputs
   if (!openTime || !closeTime || !duration || !buffer || numberOfTanks <= 0) {
     return {
       sessionsPerTank: 0,
@@ -183,7 +185,6 @@ const calculateStaggeredSessions = (
     const tankStartMinutes = openMinutes + tankIndex * Number(staggerInterval || 0)
     const availableTime = closeMinutes - tankStartMinutes
     const tankSessions = Math.floor(availableTime / sessionLength)
-
     if (tankSessions > 0) {
       const tankEndTime = tankStartMinutes + tankSessions * sessionLength
       latestEndTime = Math.max(latestEndTime, tankEndTime)
@@ -200,9 +201,6 @@ const calculateStaggeredSessions = (
   }
 }
 
-/**
- * Generate detailed session schedule for each tank - matches CalenderManage.tsx
- */
 interface SessionDetail {
   tankNumber: number
   tankName: string
@@ -297,18 +295,46 @@ const generateSessionDetails = (
 }
 
 // --- API SERVICE ---
-
 const CALENDAR_API_BASE_URL = "/calendar"
 const SETTINGS_API_BASE_URL = "/system-settings"
 
 const apiService = {
+  getBookingCounts: async (formattedStartDate: string, formattedEndDate: string): Promise<BookedCountByDate[]> => {
+    try {
+      console.log("[v0] Fetching booking counts for:", formattedStartDate, "to", formattedEndDate)
+      const apiResponse = await apiRequest.get<ApiResponse<BookedCountByDate[]>>("/appointments/counts", {
+        params: { startDate: formattedStartDate, endDate: formattedEndDate },
+      })
+      const dataArray = apiResponse && apiResponse.data ? apiResponse.data : []
+      if (Array.isArray(dataArray)) {
+        return dataArray
+      }
+      return []
+    } catch (error) {
+      console.error("[v0] Failed to fetch booking counts:", error)
+      return []
+    }
+  },
+  getBookedTimesByDate: async (date: string): Promise<string[]> => {
+    try {
+      console.log("[v0] Fetching booked times for date:", date)
+      const response = await apiRequest.get<ApiResponse<string[]>>(`/appointments/booked-times/${date}`)
+      const dataArray = response && response.data ? response.data : []
+      if (Array.isArray(dataArray)) {
+        return dataArray
+      }
+      return []
+    } catch (error) {
+      console.error("[v0] Failed to fetch booked times:", error)
+      return []
+    }
+  },
   getSystemSettings: async (): Promise<SystemSettings> => {
     try {
       console.log("[v0] Fetching system settings from:", SETTINGS_API_BASE_URL)
       const response = await apiRequest.get<SystemSettings>(SETTINGS_API_BASE_URL)
       console.log("[v0] System settings response:", response)
-
-      if (response && typeof response === "object" && 'defaultFloatPrice' in response) {
+      if (response && typeof response === "object" && "defaultFloatPrice" in response) {
         return response
       }
       throw new Error("Invalid settings response format or missing data")
@@ -317,7 +343,6 @@ const apiService = {
       throw error
     }
   },
-
   getCalendarOverrides: async (
     formattedStartDate: string,
     formattedEndDate: string,
@@ -327,12 +352,8 @@ const apiService = {
       const apiResponse = await apiRequest.get<ApiResponse<CalendarDetailFromBackend[]>>(CALENDAR_API_BASE_URL, {
         params: { startDate: formattedStartDate, endDate: formattedEndDate },
       })
-
       console.log("[v0] Calendar response:", apiResponse)
-
-      // Since apiResponse is the ApiResponse wrapper, extract the actual data.
-      const dataArray = (apiResponse && apiResponse.data) ? apiResponse.data : []
-
+      const dataArray = apiResponse && apiResponse.data ? apiResponse.data : []
       if (Array.isArray(dataArray)) {
         return dataArray.map((detail) => ({
           ...detail,
@@ -350,9 +371,7 @@ const apiService = {
 const ConsolidatedBookingForm: React.FC = () => {
   const [currentMonth, setCurrentMonth] = useState<Date>(new Date())
   const [selectedDate, setSelectedDate] = useState<Date | null>(null)
-  
-  const [name, setName] = useState("") 
-  
+  const [name, setName] = useState("")
   const [contactNumber, setContactNumber] = useState("")
   const [email, setEmail] = useState("")
   const [specialNote, setSpecialNote] = useState("")
@@ -364,25 +383,25 @@ const ConsolidatedBookingForm: React.FC = () => {
   const [defaultHours, setDefaultHours] = useState<SystemSettings | null>(null)
   const [loadingCalendar, setLoadingCalendar] = useState(false)
   const [isInitialLoad, setIsInitialLoad] = useState(true)
+  const [bookedCounts, setBookedCounts] = useState<Record<string, number>>({})
+  const [bookedTimesByDate, setBookedTimesByDate] = useState<Record<string, string[]>>({})
 
-  // --- Dynamic Data Fetching (unchanged) ---
   const fetchCalendarData = useCallback(
     async (date: Date) => {
       setLoadingCalendar(true)
       const startOfMonth = new Date(date.getFullYear(), date.getMonth(), 1)
       const endOfMonth = new Date(date.getFullYear(), date.getMonth() + 1, 0)
-
       const formattedStartDate = formatDateToKey(startOfMonth)
       const formattedEndDate = formatDateToKey(endOfMonth)
 
       try {
-        const [settings, overrides] = await Promise.all([
+        const [settings, overrides, counts] = await Promise.all([
           apiService.getSystemSettings(),
           apiService.getCalendarOverrides(formattedStartDate, formattedEndDate),
+          apiService.getBookingCounts(formattedStartDate, formattedEndDate),
         ])
 
         setDefaultHours(settings)
-
         const overridesMap = overrides.reduce(
           (acc, curr) => {
             acc[curr.date] = curr
@@ -390,13 +409,19 @@ const ConsolidatedBookingForm: React.FC = () => {
           },
           {} as Record<string, CalendarDetailFromBackend>,
         )
-
         setDayOverrides(overridesMap)
 
-        // Set today as selected date on initial load only
+        const countsMap = counts.reduce(
+          (acc, curr) => {
+            acc[curr.date] = curr.count
+            return acc
+          },
+          {} as Record<string, number>,
+        )
+        setBookedCounts(countsMap)
+
         if (isInitialLoad) {
           const today = new Date()
-          // Only set today if it's in the current month being displayed
           if (today.getMonth() === date.getMonth() && today.getFullYear() === date.getFullYear()) {
             setSelectedDate(today)
           }
@@ -416,11 +441,16 @@ const ConsolidatedBookingForm: React.FC = () => {
     fetchCalendarData(currentMonth)
   }, [currentMonth, fetchCalendarData])
 
-  // --- Handlers ---
   const handleDateSelect = (date: Date) => {
     setSelectedDate(date)
     setSelectedTime("")
     setMessage(null)
+    const dateKey = formatDateToKey(date)
+    if (!bookedTimesByDate[dateKey]) {
+      apiService.getBookedTimesByDate(dateKey).then((times) => {
+        setBookedTimesByDate((prev) => ({ ...prev, [dateKey]: times }))
+      })
+    }
   }
 
   const handleMonthNavigate = (date: Date) => {
@@ -430,19 +460,17 @@ const ConsolidatedBookingForm: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-
     const dateKey = selectedDate ? formatDateToKey(selectedDate) : null
     const override = dateKey ? dayOverrides[dateKey] : null
 
-    // Safety checks
     if (!selectedDate || !selectedTime || !email || !contactNumber || !name || !defaultHours) {
-      setMessage("Please select an available date, time, and provide all contact details. System settings must be loaded.")
+      setMessage(
+        "Please select an available date, time, and provide all contact details. System settings must be loaded.",
+      )
       return
     }
 
-    // Determine status for validation 
-    let dateStatus: DayStatus = override?.status || DAY_STATUS.BOOKABLE;
-
+    const dateStatus: DayStatus = override?.status || DAY_STATUS.BOOKABLE
     const isUnavailable = dateStatus === DAY_STATUS.CLOSED || dateStatus === DAY_STATUS.SOLD_OUT
 
     if (isUnavailable) {
@@ -460,23 +488,17 @@ const ConsolidatedBookingForm: React.FC = () => {
     setSuccessMessage(null)
 
     try {
-      // 1. Prepare the consolidated payload for the backend transaction
-      // The core fields are placed at the root to satisfy typical backend validation,
-      // and the transactional context is nested.
       const transactionData = {
-        // REQUIRED APPOINTMENT FIELDS (at root for validation)
         name: name,
         date: dateKey,
         time: selectedTime,
         email: email,
         contactNumber: contactNumber,
         specialNote: specialNote,
-
-        // CONTEXT FOR BACKEND TRANSACTION
         calendarContext: {
           date: dateKey,
-          hasCalendarOverride: !!override, 
-          currentSessionsToSell: override?.sessionsToSell, 
+          hasCalendarOverride: !!override,
+          currentSessionsToSell: override?.sessionsToSell,
           defaultSystemSettings: {
             sessionDuration: defaultHours.sessionDuration,
             cleaningBuffer: defaultHours.cleaningBuffer,
@@ -486,11 +508,10 @@ const ConsolidatedBookingForm: React.FC = () => {
             closeTime: defaultHours.closeTime,
             sessionsPerDay: defaultHours.sessionsPerDay,
           },
-        }
+        },
       }
 
-      // 2. Perform the single atomic request to the backend
-      const response = await apiRequest.post<AppointmentApiResponse>("/appointments", transactionData) 
+      const response = await apiRequest.post<AppointmentApiResponse>("/appointments", transactionData)
 
       if (response.success) {
         setIsSubmitting(false)
@@ -500,16 +521,14 @@ const ConsolidatedBookingForm: React.FC = () => {
         )
         setMessage(null)
 
-        // Reset states
         setSelectedTime("")
         setSelectedDate(null)
-        setName("") 
+        setName("")
         setContactNumber("")
         setEmail("")
         setSpecialNote("")
 
-        // 3. Re-fetch calendar data to instantly display the updated available slot count
-        fetchCalendarData(currentMonth) 
+        fetchCalendarData(currentMonth)
       } else {
         setIsSubmitting(false)
         setMessage(response.message || "Booking failed: Server rejected the request.")
@@ -522,17 +541,13 @@ const ConsolidatedBookingForm: React.FC = () => {
     }
   }
 
-  // --- Generate Session Details for Selected Date (unchanged) ---
   const sessionDetails = useMemo(() => {
-    if (!selectedDate || !defaultHours) return [] // Check if defaultHours is loaded
-
+    if (!selectedDate || !defaultHours) return []
     const dateKey = formatDateToKey(selectedDate)
     const override = dayOverrides[dateKey]
-
     const effectiveOpenTime = override?.openTime || defaultHours.openTime
     const effectiveCloseTime = override?.closeTime || defaultHours.closeTime
 
-    // Check if the day is closed or sold out
     const status = override?.status || DAY_STATUS.BOOKABLE
     if (status === DAY_STATUS.CLOSED || status === DAY_STATUS.SOLD_OUT) return []
 
@@ -546,7 +561,6 @@ const ConsolidatedBookingForm: React.FC = () => {
     )
   }, [selectedDate, dayOverrides, defaultHours])
 
-  // --- Extract All Available Time Slots from Session Details (unchanged) ---
   const availableTimeSlots = useMemo(() => {
     const slots: string[] = []
     sessionDetails.forEach((tank) => {
@@ -559,33 +573,36 @@ const ConsolidatedBookingForm: React.FC = () => {
     return slots
   }, [sessionDetails])
 
-  const inputClass = "input-style"
+  const bookedTimesForSelectedDate = useMemo(() => {
+    if (!selectedDate) return []
+    const dateKey = formatDateToKey(selectedDate)
+    return bookedTimesByDate[dateKey] || []
+  }, [selectedDate, bookedTimesByDate])
 
+  const inputClass = "input-style"
   const CustomStyles = `
-         :root {
-             --theta-blue: ${THEME_COLORS["--theta-blue"]};
-             --theta-red: ${THEME_COLORS["--theta-red"]};
-             --theta-green: ${THEME_COLORS["--theta-green"]};
-             --theta-orange: ${THEME_COLORS["--theta-orange"]};
-             --light-blue-200: ${THEME_COLORS["--light-blue-200"]};
-             --light-blue-50: ${THEME_COLORS["--light-blue-50"]};
-             --dark-blue-800: ${THEME_COLORS["--dark-blue-800"]};
-             --accent-color: ${THEME_COLORS["--accent-color"]};
-         }
-         
-         .input-style {
-             width: 100%;
-             padding: 0.75rem; 
-             border: none;
-             border-radius: 0.5rem;
-             transition: all 0.15s ease-in-out;
-         }
-    `
+    :root {
+      --theta-blue: ${THEME_COLORS["--theta-blue"]};
+      --theta-red: ${THEME_COLORS["--theta-red"]};
+      --theta-green: ${THEME_COLORS["--theta-green"]};
+      --theta-orange: ${THEME_COLORS["--theta-orange"]};
+      --light-blue-200: ${THEME_COLORS["--light-blue-200"]};
+      --light-blue-50: ${THEME_COLORS["--light-blue-50"]};
+      --dark-blue-800: ${THEME_COLORS["--dark-blue-800"]};
+      --accent-color: ${THEME_COLORS["--accent-color"]};
+    }
+    .input-style {
+      width: 100%;
+      padding: 0.75rem;
+      border: none;
+      border-radius: 0.5rem;
+      transition: all 0.15s ease-in-out;
+    }
+  `
 
   return (
     <div className="bg-[var(--light-blue-50)] min-h-screen pt-0">
       <style dangerouslySetInnerHTML={{ __html: CustomStyles }} />
-
       <div className="w-full bg-white shadow-2xl rounded-xl py-8 lg:py-12 border border-gray-100 relative overflow-hidden mt-[72px]">
         {successMessage && (
           <div className="absolute inset-0 z-20 flex flex-col items-center justify-center p-10 bg-white/95 backdrop-blur-sm rounded-xl">
@@ -648,7 +665,12 @@ const ConsolidatedBookingForm: React.FC = () => {
                   />
                 </div>
                 <div className="lg:col-span-1 pt-6 lg:pt-0">
-                  <EventSidebar selectedDate={selectedDate} dayOverrides={dayOverrides} defaultHours={defaultHours} />
+                  <EventSidebar
+                    selectedDate={selectedDate}
+                    dayOverrides={dayOverrides}
+                    defaultHours={defaultHours}
+                    bookedCounts={bookedCounts}
+                  />
                 </div>
               </>
             )}
@@ -668,31 +690,13 @@ const ConsolidatedBookingForm: React.FC = () => {
                     </span>
                     <div>
                       <span className="font-bold text-lg" style={{ color: THEME_COLORS["--theta-green"] }}>
-                        {availableTimeSlots.length}
+                        {availableTimeSlots.length - bookedTimesForSelectedDate.length}
                       </span>
                       <span className="text-gray-600 text-sm"> slots available</span>
                     </div>
                   </div>
                 )}
               </div>
-
-              {selectedDate && sessionDetails.length > 0 && defaultHours && (
-                <div className="p-3 bg-blue-50 border-l-4 border-[var(--theta-blue)] text-gray-700 rounded-r-lg shadow-sm">
-                  <div className="flex items-start gap-3">
-                    <Clock className="w-5 h-5 mt-0.5 flex-shrink-0" style={{ color: THEME_COLORS["--theta-blue"] }} />
-                    <div className="text-sm">
-                      <p className="font-bold mb-1" style={{ color: THEME_COLORS["--theta-blue"] }}>
-                        Operating: {dayOverrides[formatDateToKey(selectedDate)]?.openTime || defaultHours.openTime} -{" "}
-                        {dayOverrides[formatDateToKey(selectedDate)]?.closeTime || defaultHours.closeTime}
-                        {defaultHours.tankStaggerInterval > 0 && ` | Stagger: ${defaultHours.tankStaggerInterval} min`}
-                      </p>
-                      <p className="font-medium">
-                        Session: {defaultHours.sessionDuration} min | Cleaning: {defaultHours.cleaningBuffer} min
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              )}
 
               {sessionDetails.length > 0 ? (
                 <div className="space-y-6">
@@ -704,26 +708,31 @@ const ConsolidatedBookingForm: React.FC = () => {
                         Quick Select - All Available Times
                       </h3>
                       <span className="px-3 py-1 rounded-full bg-green-600 text-white font-bold text-sm">
-                        {availableTimeSlots.length} Open
+                        {availableTimeSlots.length - bookedTimesForSelectedDate.length} Open
                       </span>
                     </div>
-
                     <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
-                      {availableTimeSlots.map((time) => (
-                        <button
-                          type="button"
-                          key={time}
-                          onClick={() => setSelectedTime(time)}
-                          className={`py-2.5 px-2 rounded-lg text-sm font-semibold transition duration-150 border-2 ${
-                            selectedTime === time
-                              ? "bg-[var(--accent-color)] text-white border-[var(--accent-color)] shadow-lg scale-105"
-                              : "bg-white text-gray-700 border-green-300 hover:bg-green-50 hover:border-green-500 shadow-sm"
-                          }`}
-                          disabled={isSubmitting}
-                        >
-                          {time}
-                        </button>
-                      ))}
+                      {availableTimeSlots.map((time) => {
+                        const isBooked = bookedTimesForSelectedDate.includes(time)
+                        return (
+                          <button
+                            type="button"
+                            key={time}
+                            onClick={() => setSelectedTime(time)}
+                            className={`py-2.5 px-2 rounded-lg text-sm font-semibold transition duration-150 border-2 ${
+                              isBooked
+                                ? "bg-gray-200 text-gray-500 border-gray-300 cursor-not-allowed opacity-60"
+                                : selectedTime === time
+                                  ? "bg-[var(--accent-color)] text-white border-[var(--accent-color)] shadow-lg scale-105"
+                                  : "bg-white text-gray-700 border-green-300 hover:bg-green-50 hover:border-green-500 shadow-sm"
+                            }`}
+                            disabled={isSubmitting || isBooked}
+                          >
+                            {time}
+                            {isBooked && <span className="block text-xs mt-1">Booked</span>}
+                          </button>
+                        )
+                      })}
                     </div>
                   </div>
 
@@ -732,13 +741,13 @@ const ConsolidatedBookingForm: React.FC = () => {
                     <h3 className="text-base font-bold text-gray-700 flex items-center gap-2 border-b pb-2">
                       <Users className="w-5 h-5" style={{ color: THEME_COLORS["--theta-blue"] }} />
                       Complete Schedule - All Tanks
+                      <span className="text-xs text-gray-500 ml-auto">Click a session to select the time</span>
                     </h3>
-
                     {sessionDetails.map((tankDetail) => (
                       <div
                         key={tankDetail.tankNumber}
                         className="border-2 rounded-xl p-4"
-                        style={{ borderColor: THEME_COLORS["--theta-blue"] + "30" }}
+                        style={{ borderColor: hexToRgba(THEME_COLORS["--theta-blue"], 0.2) }}
                       >
                         {/* Tank Header */}
                         <div className="flex items-center justify-between mb-3 pb-3 border-b border-gray-200">
@@ -761,7 +770,7 @@ const ConsolidatedBookingForm: React.FC = () => {
                           <span
                             className="px-3 py-1 rounded-lg text-xs font-bold"
                             style={{
-                              backgroundColor: THEME_COLORS["--theta-green"] + "20",
+                              backgroundColor: hexToRgba(THEME_COLORS["--theta-green"], 0.2),
                               color: THEME_COLORS["--theta-green"],
                             }}
                           >
@@ -771,60 +780,69 @@ const ConsolidatedBookingForm: React.FC = () => {
 
                         {/* Sessions Grid */}
                         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                          {tankDetail.sessions.map((session) => (
-                            <button
-                              type="button"
-                              key={`${tankDetail.tankNumber}-${session.sessionNumber}`}
-                              onClick={() => setSelectedTime(session.startTime)}
-                              className={`p-3 rounded-lg text-left transition-all duration-150 border-2 ${
-                                selectedTime === session.startTime
-                                  ? "bg-[var(--accent-color)] text-white border-[var(--accent-color)] shadow-lg scale-105"
-                                  : "bg-white text-gray-700 border-gray-300 hover:bg-blue-50 hover:border-[var(--theta-blue)] shadow-sm"
-                              }`}
-                              disabled={isSubmitting}
-                            >
-                              <div className="flex items-center justify-between mb-2">
-                                <span
-                                  className={`text-xs font-bold px-2 py-0.5 rounded ${
-                                    selectedTime === session.startTime
-                                      ? "bg-white/20 text-white"
-                                      : "bg-blue-100 text-blue-700"
-                                  }`}
-                                >
-                                  #{session.sessionNumber}
-                                </span>
-                                <CheckCircle
-                                  className={`w-4 h-4 ${
-                                    selectedTime === session.startTime ? "text-white" : "text-green-500"
-                                  }`}
-                                />
-                              </div>
-
-                              <div className="space-y-1.5">
-                                {/* Session Time */}
-                                <div className="flex items-center gap-1">
-                                  <Clock className="w-3 h-3 opacity-70" />
-                                  <div>
-                                    <p className="text-xs font-bold">{session.startTime}</p>
-                                    <p className="text-xs font-bold">{session.endTime}</p>
+                          {tankDetail.sessions.map((session) => {
+                            const isBooked = bookedTimesForSelectedDate.includes(session.startTime)
+                            return (
+                              <button
+                                type="button"
+                                key={`${tankDetail.tankNumber}-${session.sessionNumber}`}
+                                onClick={() => setSelectedTime(session.startTime)}
+                                className={`p-3 rounded-lg text-left transition-all duration-150 border-2 ${
+                                  isBooked
+                                    ? "bg-gray-100 text-gray-500 border-gray-300 cursor-not-allowed opacity-60"
+                                    : selectedTime === session.startTime
+                                      ? "bg-[var(--accent-color)] text-white border-[var(--accent-color)] shadow-lg scale-105"
+                                      : "bg-white text-gray-700 border-gray-300 hover:bg-blue-50 hover:border-[var(--theta-blue)] shadow-sm"
+                                }`}
+                                disabled={isSubmitting || isBooked}
+                              >
+                                <div className="flex items-center justify-between mb-2">
+                                  <span
+                                    className={`text-xs font-bold px-2 py-0.5 rounded ${
+                                      isBooked
+                                        ? "bg-gray-200 text-gray-600"
+                                        : selectedTime === session.startTime
+                                          ? "bg-white/20 text-white"
+                                          : "bg-blue-100 text-blue-700"
+                                    }`}
+                                  >
+                                    {isBooked ? "✗ Booked" : `#${session.sessionNumber}`}
+                                  </span>
+                                  <CheckCircle
+                                    className={`w-4 h-4 ${
+                                      isBooked
+                                        ? "text-gray-400"
+                                        : selectedTime === session.startTime
+                                          ? "text-white"
+                                          : "text-green-500"
+                                    }`}
+                                  />
+                                </div>
+                                <div className="space-y-1.5">
+                                  {/* Session Time */}
+                                  <div className="flex items-center gap-1">
+                                    <Clock className="w-3 h-3 opacity-70" />
+                                    <div>
+                                      <p className="text-xs font-bold">{session.startTime}</p>
+                                      <p className="text-xs font-bold">{session.endTime}</p>
+                                    </div>
+                                  </div>
+                                  {/* Cleaning Time */}
+                                  <div className="flex items-center gap-1">
+                                    <div className="w-3 h-3 flex-shrink-0 flex items-center justify-center">
+                                      <div
+                                        className="w-2 h-2 rounded-full"
+                                        style={{ backgroundColor: THEME_COLORS["--theta-orange"] }}
+                                      />
+                                    </div>
+                                    <p className="text-[10px] opacity-80">
+                                      Clean: {session.cleaningStart} - {session.cleaningEnd}
+                                    </p>
                                   </div>
                                 </div>
-
-                                {/* Cleaning Time */}
-                                <div className="flex items-center gap-1">
-                                  <div className="w-3 h-3 flex-shrink-0 flex items-center justify-center">
-                                    <div
-                                      className="w-2 h-2 rounded-full"
-                                      style={{ backgroundColor: THEME_COLORS["--theta-orange"] }}
-                                    />
-                                  </div>
-                                  <p className="text-[10px] opacity-80">
-                                    Clean: {session.cleaningStart} - {session.cleaningEnd}
-                                  </p>
-                                </div>
-                              </div>
-                            </button>
-                          ))}
+                              </button>
+                            )
+                          })}
                         </div>
                       </div>
                     ))}
@@ -847,8 +865,6 @@ const ConsolidatedBookingForm: React.FC = () => {
             </div>
 
             <div className="space-y-6">
-              
-              {/* NEW FIELD: Full Name */}
               <div>
                 <label htmlFor="name" className="block text-lg font-semibold text-gray-700 mb-2">
                   Full Name
@@ -859,7 +875,7 @@ const ConsolidatedBookingForm: React.FC = () => {
                   <input
                     id="name"
                     type="text"
-                    name="name" 
+                    name="name"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     required
@@ -912,7 +928,6 @@ const ConsolidatedBookingForm: React.FC = () => {
                 </div>
               </div>
 
-              {/* Special Note Textarea (OPTIONAL) */}
               <div>
                 <label htmlFor="note" className="block text-lg font-semibold text-gray-700 mb-2">
                   Special Note (Optional)
@@ -932,7 +947,6 @@ const ConsolidatedBookingForm: React.FC = () => {
                 </div>
               </div>
 
-              {/* Submit Button (Uses --theta-blue) */}
               <div className="pt-4">
                 <button
                   type="submit"
@@ -984,10 +998,8 @@ const CustomCalendar: React.FC<{
     const dateKey = formatDateToKey(date)
     const override = dayOverrides[dateKey]
     const isCurrentMonth = date.getMonth() === currentDate.getMonth()
-
     const baseClasses =
       "flex items-center justify-center h-10 w-10 text-center text-sm font-semibold rounded-full transition duration-150 cursor-pointer"
-
     const isPastDate = date < new Date(new Date().setHours(0, 0, 0, 0))
 
     if (!isCurrentMonth || isPastDate) {
@@ -996,7 +1008,6 @@ const CustomCalendar: React.FC<{
 
     const isSelected = isSameDay(date, selectedDate)
     const isTodayMarker = isToday(date)
-
     const status = override?.status
 
     if (isSelected) {
@@ -1008,7 +1019,7 @@ const CustomCalendar: React.FC<{
     } else if (isTodayMarker) {
       return `${baseClasses} bg-[var(--theta-blue)] text-white shadow-md`
     } else {
-      return `${baseClasses} text-gray-700 hover:bg-gray-100`
+      return `${baseClasses} bg-white text-gray-700 hover:bg-gray-100`
     }
   }
 
@@ -1041,7 +1052,6 @@ const CustomCalendar: React.FC<{
         {calendarDays.map((date, index) => {
           const isCurrentMonth = date.getMonth() === currentDate.getMonth()
           const isPastDate = date < new Date(new Date().setHours(0, 0, 0, 0))
-
           const isClickable = isCurrentMonth && !isPastDate
 
           return (
@@ -1065,10 +1075,10 @@ const CustomCalendar: React.FC<{
 const EventSidebar: React.FC<{
   selectedDate: Date | null
   dayOverrides: Record<string, CalendarDetailFromBackend>
-  defaultHours: SystemSettings | null // defaultHours can be null
-}> = ({ selectedDate, dayOverrides, defaultHours }) => {
+  defaultHours: SystemSettings | null
+  bookedCounts: Record<string, number>
+}> = ({ selectedDate, dayOverrides, defaultHours, bookedCounts }) => {
   if (!selectedDate || !defaultHours) {
-    // Check if defaultHours is loaded
     return (
       <div className="w-full max-w-sm ml-auto space-y-4 pt-1">
         <div className="text-center py-12 px-4">
@@ -1088,11 +1098,9 @@ const EventSidebar: React.FC<{
   const displayDate = selectedDate
   const dateKey = formatDateToKey(displayDate)
   const override = dayOverrides[dateKey]
-
   const effectiveOpenTime = override?.openTime || defaultHours.openTime
   const effectiveCloseTime = override?.closeTime || defaultHours.closeTime
 
-  // Calculate sessions using staggered tank logic
   const calculatedSessions = calculateStaggeredSessions(
     effectiveOpenTime,
     effectiveCloseTime,
@@ -1102,9 +1110,10 @@ const EventSidebar: React.FC<{
     defaultHours.tankStaggerInterval,
   )
 
+  const totalBookedCount = bookedCounts[dateKey] || 0
   const sessionsToSell = override?.sessionsToSell ?? calculatedSessions.totalSessions
-  const bookedSessions = override?.bookedSessions || 0
-  const availableSlots = Math.max(0, sessionsToSell - bookedSessions)
+  const bookedSessionsForAvailability = override?.bookedSessions || 0
+  const availableSlots = Math.max(0, sessionsToSell - bookedSessionsForAvailability)
 
   let dateStatus: DayStatus
   if (override?.status === DAY_STATUS.CLOSED) {
@@ -1118,7 +1127,6 @@ const EventSidebar: React.FC<{
   const isClosed = dateStatus === DAY_STATUS.CLOSED
   const isSoldOut = dateStatus === DAY_STATUS.SOLD_OUT
   const isClosedOrSoldOut = isClosed || isSoldOut
-
   const operationalHours = dateStatus !== DAY_STATUS.CLOSED ? `${effectiveOpenTime} - ${effectiveCloseTime}` : "CLOSED"
 
   const dateBoxColor = isClosed
@@ -1143,7 +1151,16 @@ const EventSidebar: React.FC<{
       value: `${sessionsToSell} sessions`,
       status: "full",
     },
-    { label: "Booked", value: `${bookedSessions} sessions`, status: "full" },
+    {
+      label: "Total Bookings",
+      value: `${totalBookedCount} bookings`,
+      status: totalBookedCount > 0 ? "full" : "info",
+    },
+    {
+      label: "Booked (Avail. Calc)",
+      value: `${bookedSessionsForAvailability} sessions`,
+      status: bookedSessionsForAvailability > 0 ? "full" : "info",
+    },
     {
       label: "Available",
       value: `${availableSlots} slots`,
@@ -1194,7 +1211,6 @@ const EventSidebar: React.FC<{
           <span className="text-3xl">{dateNum}</span>
           <span className="text-sm">{month}</span>
         </div>
-
         <div className="flex items-center pt-1 text-sm">
           <span className="text-gray-500 mr-1">Status:</span>
           <span className={`font-bold ${statusTextColor}`}>{dateStatus.toUpperCase()}</span>
@@ -1210,7 +1226,6 @@ const EventSidebar: React.FC<{
           {sessions.map((session, index) => (
             <div key={index} className="flex justify-between items-center">
               <p className="text-sm text-gray-600 font-medium">{session.label}</p>
-
               {session.label === "Operating Hours" || session.label === "Actual Close Time" ? (
                 <p className={`text-sm font-bold ${getStatusColor(session.status)}`}>{session.value}</p>
               ) : (
@@ -1223,12 +1238,11 @@ const EventSidebar: React.FC<{
         </div>
       </div>
 
-      {/* Tank Information Card */}
       {!isClosed && defaultHours.numberOfTanks > 1 && (
         <div
           className="mt-4 p-4 rounded-lg border-2"
           style={{
-            backgroundColor: `${THEME_COLORS["--light-blue-50"]}`,
+            backgroundColor: hexToRgba(THEME_COLORS["--theta-blue"], 0.05),
             borderColor: THEME_COLORS["--theta-blue"],
           }}
         >
