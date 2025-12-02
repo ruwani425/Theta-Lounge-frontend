@@ -1147,7 +1147,7 @@ const EventSidebar: React.FC<{
       status: "info",
     },
     {
-      label: "Total Sessions",
+      label: "Available Sessions",
       value: `${sessionsToSell} sessions`,
       status: "full",
     },
@@ -1156,16 +1156,16 @@ const EventSidebar: React.FC<{
       value: `${totalBookedCount} bookings`,
       status: totalBookedCount > 0 ? "full" : "info",
     },
-    {
-      label: "Booked (Avail. Calc)",
-      value: `${bookedSessionsForAvailability} sessions`,
-      status: bookedSessionsForAvailability > 0 ? "full" : "info",
-    },
-    {
-      label: "Available",
-      value: `${availableSlots} slots`,
-      status: isClosedOrSoldOut || availableSlots === 0 ? "full" : "available",
-    },
+    // {
+    //   label: "Booked (Avail. Calc)",
+    //   value: `${bookedSessionsForAvailability} sessions`,
+    //   status: bookedSessionsForAvailability > 0 ? "full" : "info",
+    // },
+    // {
+    //   label: "Available",
+    //   value: `${availableSlots} slots`,
+    //   status: isClosedOrSoldOut || availableSlots === 0 ? "full" : "available",
+    // },
     {
       label: "Status",
       value: dateStatus.toUpperCase(),
