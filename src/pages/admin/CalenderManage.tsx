@@ -1,1150 +1,1318 @@
-"use client"
+"use client";
 
-import type React from "react"
-import { useEffect, useState, useCallback, useMemo, type ChangeEvent, type FormEvent } from "react"
+import type React from "react";
+import {
+  useEffect,
+  useState,
+  useMemo,
+  useCallback,
+} from "react";
 import {
   CalendarIcon,
-  X,
   ChevronLeft,
   ChevronRight,
   Clock,
-  Lock,
-  Unlock,
-  Zap,
-  XCircle,
-  CheckCircle,
+  Users,
+  CheckCircle2,
+  Calendar as CalendarDays,
+  TrendingUp,
+  X,
   Save,
-} from "lucide-react"
-import Swal from "sweetalert2"
-import apiRequest from "../../core/axios" 
+  XCircle,
+  Lock,
+  AlertCircle,
+  Sparkles,
+  Settings,
+} from "lucide-react";
+import Swal from "sweetalert2";
+import apiRequest from "../../core/axios";
 
-// --- DATE UTILITY FUNCTIONS ---
-const _format = (date: Date, fmt: string): string => {
-  const year = date.getFullYear()
-  const month = date.getMonth() + 1
-  const day = date.getDate()
-  const dayOfWeek = date.getDay()
-  const daysShort = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
-  const monthsShort = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+// --- THEME COLORS ---
+const COLORS = {
+  primary: "#5B8DC4",
+  primaryDark: "#2C4A6F",
+  primaryLight: "#A8D0E8",
+  success: "#10B981",
+  warning: "#F59E0B",
+  error: "#EF4444",
+  gray50: "#F9FAFB",
+  gray100: "#F3F4F6",
+  gray200: "#E5E7EB",
+  gray300: "#D1D5DB",
+  gray400: "#9CA3AF",
+  gray600: "#4B5563",
+  gray700: "#374151",
+  gray800: "#1F2937",
+  white: "#FFFFFF",
+};
 
-  if (fmt === "yyyy-MM-dd") {
-    return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`
+// --- UTILITY FUNCTIONS ---
+const formatDate = (date: Date | string, format: string): string => {
+  const dateObj = typeof date === 'string' ? new Date(date) : date;
+  
+  // Validate date
+  if (isNaN(dateObj.getTime())) {
+    console.error('Invalid date:', date);
+    return '';
   }
-  if (fmt === "MMM dd") {
-    return `${monthsShort[date.getMonth()]} ${String(day)}`
+
+  const year = dateObj.getFullYear();
+  const month = dateObj.getMonth();
+  const day = dateObj.getDate();
+  const monthNames = ["January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"];
+  const monthShort = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+  if (format === "yyyy-MM-dd") {
+    return `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
   }
-  if (fmt === "EEE") {
-    return daysShort[dayOfWeek]
+  if (format === "MMMM yyyy") {
+    return `${monthNames[month]} ${year}`;
   }
-  if (fmt === "EEEE, MMMM do, yyyy") {
-    const daysLong = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
-    const monthsLong = [
-      "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December",
-    ]
-    const suffix = (d: number) => {
-      if (d > 3 && d < 21) return "th"
-      switch (d % 10) {
-        case 1: return "st"
-        case 2: return "nd"
-        case 3: return "rd"
-        default: return "th"
-      }
-    }
-    return `${daysLong[dayOfWeek]}, ${monthsLong[date.getMonth()]} ${day}${suffix(day)}, ${year}`
+  if (format === "MMM dd") {
+    return `${monthShort[month]} ${day}`;
   }
-  return date.toDateString()
-}
+  if (format === "full") {
+    return `${dayNames[dateObj.getDay()]}, ${monthNames[month]} ${day}, ${year}`;
+  }
+  return dateObj.toDateString();
+};
 
-const _addDays = (date: Date, days: number): Date => {
-  const newDate = new Date(date)
-  newDate.setDate(date.getDate() + days)
-  return newDate
-}
+const isSameDay = (d1: Date, d2: Date): boolean => {
+  return d1.getFullYear() === d2.getFullYear() &&
+    d1.getMonth() === d2.getMonth() &&
+    d1.getDate() === d2.getDate();
+};
 
-const _subDays = (date: Date, days: number): Date => {
-  return _addDays(date, -days)
-}
+const addMonths = (date: Date, months: number): Date => {
+  const newDate = new Date(date);
+  newDate.setMonth(date.getMonth() + months);
+  return newDate;
+};
 
-const _startOfDay = (date: Date): Date => {
-  const d = new Date(date)
-  d.setHours(0, 0, 0, 0)
-  return d
-}
+// --- TYPE DEFINITIONS ---
+type DayStatus = "Bookable" | "Closed" | "Sold Out";
 
-const _endOfDay = (date: Date): Date => {
-  const d = _addDays(date, 1)
-  d.setHours(0, 0, 0, 0)
-  return d
-}
-
-const _isSameDay = (date1: Date, date2: Date): boolean => {
-  return (
-    date1.getFullYear() === date2.getFullYear() &&
-    date1.getMonth() === date2.getMonth() &&
-    date1.getDate() === date2.getDate()
-  )
-}
-
-const _getDaysInMonth = (date: Date): number => {
-  return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate()
-}
-
-const _getFirstDayOfMonth = (date: Date): number => {
-  return new Date(date.getFullYear(), date.getMonth(), 1).getDay()
-}
-
-// --- TYPE DEFINITIONS & CONSTANTS ---
-const DAY_STATUS = {
-  BOOKABLE: "Bookable",
-  CLOSED: "Closed",
-  SOLD_OUT: "Sold Out",
-} as const
-
-type DayStatus = (typeof DAY_STATUS)[keyof typeof DAY_STATUS]
-
-interface Hours {
-  open: string
-  close: string
+interface SystemSettings {
+  defaultFloatPrice: number;
+  cleaningBuffer: number;
+  sessionDuration: number;
+  sessionsPerDay: number;
+  openTime: string;
+  closeTime: string;
+  numberOfTanks: number;
+  tankStaggerInterval: number;
+  actualCloseTime?: string;
 }
 
 interface Tank {
-  _id: string
-  name: string
-  capacity: number
-  length: number
-  width: number
-  benefits: string
-  status: "Ready" | "Maintenance"
-  // Removed hardcoded sessionDuration, but kept type for tank details if used later
-  sessionDuration: number
+  _id: string;
+  name: string;
+  status: "Ready" | "Maintenance";
 }
 
-interface FacilityDayData {
-  date: string
-  status: DayStatus
-  hours: Hours
-  totalAvailableSessions: number
-  totalBookedSessions: number
-  overrideData: CalendarDetailFromBackend[]
-  // Added cycleDuration for UI display and clarity
-  cycleDuration: number 
+interface CalendarOverride {
+  _id?: string;
+  tankId: string;
+  date: string;
+  status: DayStatus;
+  openTime: string;
+  closeTime: string;
+  sessionsToSell: number;
+  bookedSessions: number;
 }
 
-interface CalendarDetailFromBackend {
-  _id?: string
-  tankId: string
-  date: string
-  status: DayStatus
-  openTime: string
-  closeTime: string
-  sessionsToSell: number
-  bookedSessions: number
+interface DayData {
+  date: string;
+  status: DayStatus;
+  openTime: string;
+  closeTime: string;
+  totalSessions: number;
+  bookedSessions: number;
+  availableSessions: number;
+  overrides: CalendarOverride[];
 }
 
-interface FacilityUpdatePayload {
-  date: string
-  status: DayStatus
-  openTime: string
-  closeTime: string
-  sessionsToSell: number
-}
-
-interface ApiResponse<T> {
-  success: boolean
-  data: T
-  message?: string
-}
-
-interface SystemSettings {
-  defaultFloatPrice: number
-  cleaningBuffer: number // Used for BREAK_DURATION_MINUTES
-  sessionDuration: number // Used for SESSION_DURATION_MINUTES
-  sessionsPerDay: number
-  openTime: string
-  closeTime: string
-}
-
-// --- SESSION CALCULATION UTILITY ---
-
-/**
- * Calculates the number of full session cycles possible within the operating hours,
- * based on dynamic session and cleaning times.
- * @param openTime 'HH:mm'
- * @param closeTime 'HH:mm'
- * @param sessionDuration The duration of the session in minutes (e.g., 60)
- * @param cleaningBuffer The duration of the cleaning buffer/break in minutes (e.g., 30)
- * @returns number of sessions per tank
- */
-const calculateSessionCountPerTank = (
-  openTime: string,
-  closeTime: string,
-  sessionDuration: number,
-  cleaningBuffer: number
-): number => {
-  const totalCycleMinutes = sessionDuration + cleaningBuffer
-  if (totalCycleMinutes <= 0) return 0
-    
-  try {
-    const fixedDate = "2000/01/01"
-    const open = new Date(`${fixedDate} ${openTime}`)
-    const close = new Date(`${fixedDate} ${closeTime}`)
-    
-    if (close.getTime() <= open.getTime()) return 0
-    
-    const durationMinutes = (close.getTime() - open.getTime()) / (60 * 1000)
-    return Math.floor(durationMinutes / totalCycleMinutes)
-  } catch (e) {
-    console.error("Error calculating session count:", e);
-    return 0
-  }
-}
-
-// --- MINIMAL DEFAULT DATA (Failover Only) ---
-// Using 60 and 30 as a sensible default if the API fetch fails completely
-const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
-  defaultFloatPrice: 27,
-  cleaningBuffer: 30, 
-  sessionDuration: 60,
-  sessionsPerDay: 7,
-  openTime: "10:00", 
-  closeTime: "21:00",
+interface SessionDetail {
+  tankNumber: number;
+  tankName: string;
+  sessions: {
+    sessionNumber: number;
+    startTime: string;
+    endTime: string;
+    cleaningStart: string;
+    cleaningEnd: string;
+  }[];
 }
 
 // --- API SERVICE ---
-const CALENDAR_API_BASE_URL = "/calendar"
-const SETTINGS_API_BASE_URL = "/system-settings"
-const TANK_API_BASE_URL = "/tanks"
-
 const apiService = {
-getSystemSettings: async (): Promise<SystemSettings> => {
-  try {
-    const response = await apiRequest.get<SystemSettings>(SETTINGS_API_BASE_URL)
-
-    return { ...DEFAULT_SYSTEM_SETTINGS, ...response }  // ✅ FIXED
-  } catch (error) {
-    Swal.fire({
-      icon: "error",
-      title: "Failed to Load Settings",
-      text: "Could not fetch system settings. Using defaults.",
-      toast: true,
-      position: "top-end",
-      showConfirmButton: false,
-      timer: 3000,
-    })
-    return DEFAULT_SYSTEM_SETTINGS
-  }
-}
-,
+  getSystemSettings: async (): Promise<SystemSettings> => {
+    try {
+      const response = await apiRequest.get<SystemSettings>("/system-settings");
+      return response;
+    } catch (error) {
+      Swal.fire({
+        icon: "error",
+        title: "Failed to Load Settings",
+        text: "Could not fetch system settings.",
+        toast: true,
+        position: "top-end",
+        timer: 3000,
+      });
+      throw error;
+    }
+  },
   getAllTanks: async (): Promise<Tank[]> => {
     try {
-      const response = await apiRequest.get<Tank[]>(TANK_API_BASE_URL)
-      return response || []
+      const response = await apiRequest.get<Tank[]>("/tanks");
+      return response || [];
     } catch (error) {
-      Swal.fire({
-        icon: "error",
-        title: "Failed to Load Tanks",
-        text: "Could not fetch tanks. Assuming 0 ready tanks.",
-        toast: true,
-        position: "top-end",
-        showConfirmButton: false,
-        timer: 3000,
-      })
-      return []
+      return [];
     }
   },
-  getCalendarOverrides: async (
-    formattedStartDate: string,
-    formattedEndDate: string,
-  ): Promise<CalendarDetailFromBackend[]> => {
+  getCalendarOverrides: async (startDate: string, endDate: string): Promise<CalendarOverride[]> => {
     try {
-      const apiResponse = await apiRequest.get<ApiResponse<CalendarDetailFromBackend[]>>(CALENDAR_API_BASE_URL, {
-        params: { startDate: formattedStartDate, endDate: formattedEndDate },
-      })
-      if (apiResponse.success && apiResponse.data) {
-        return apiResponse.data.map((override) => ({
-          ...override,
-          bookedSessions: Math.min(override.sessionsToSell, override.bookedSessions || 0),
-          tankId: override.tankId || "missing-tank-id",
-        }))
-      }
-      return []
+      const response = await apiRequest.get<{ success: boolean; data: CalendarOverride[] }>("/calendar", {
+        params: { startDate, endDate }
+      });
+      return response.success ? response.data : [];
     } catch (error) {
-      Swal.fire({
-        icon: "error",
-        title: "Failed to Load Calendar",
-        text: "Could not fetch calendar overrides. Showing defaults only.",
-        toast: true,
-        position: "top-end",
-        showConfirmButton: false,
-        timer: 3000,
-      })
-      return []
+      return [];
     }
   },
-  updateFacilityStatus: async (
+  updateDayStatus: async (
     date: string,
     status: DayStatus,
     openTime: string,
     closeTime: string,
-    sessionsToSell: number,
+    sessionsToSell: number
   ): Promise<boolean> => {
     try {
-      const payload: FacilityUpdatePayload = {
+      const response = await apiRequest.post<{ success: boolean }>("/calendar", {
         date,
         status,
         openTime,
         closeTime,
         sessionsToSell,
-      }
-      const apiResponse = await apiRequest.post<ApiResponse<any>>(CALENDAR_API_BASE_URL, payload)
-      if (apiResponse.success) {
-        return true
-      } else {
-        return false
-      }
-    } catch (error: any) {
-      const displayError =
-        (error && error.message) ||
-        (error && error.data && error.data.message) ||
-        "Unknown server error or network issue."
-      throw new Error(`Save failed: ${displayError}`)
+      });
+      return response.success;
+    } catch (error) {
+      throw error;
     }
   },
+};
+
+// --- SESSION CALCULATION WITH VALIDATION ---
+const calculateStaggeredSessions = (
+  openTime: string,
+  closeTime: string,
+  duration: number,
+  buffer: number,
+  numberOfTanks: number,
+  staggerInterval: number
+): { sessionsPerTank: number; actualCloseTime: string } => {
+  // Validate inputs
+  if (!openTime || !closeTime || !duration || !buffer || numberOfTanks <= 0) {
+    return { sessionsPerTank: 0, actualCloseTime: closeTime || "00:00" };
+  }
+
+  const timeToMinutes = (time: string): number => {
+    try {
+      const [hours, minutes] = time.split(':').map(Number);
+      if (isNaN(hours) || isNaN(minutes)) return 0;
+      return hours * 60 + minutes;
+    } catch {
+      return 0;
+    }
+  };
+
+  const minutesToTime = (minutes: number): string => {
+    if (isNaN(minutes)) return "00:00";
+    const hrs = Math.floor(minutes / 60) % 24;
+    const mins = minutes % 60;
+    return `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+  };
+
+  const openMinutes = timeToMinutes(openTime);
+  let closeMinutes = timeToMinutes(closeTime);
+  if (closeMinutes <= openMinutes) closeMinutes += 24 * 60;
+
+  const sessionLength = Number(duration) + Number(buffer);
+  if (sessionLength <= 0 || isNaN(sessionLength)) {
+    return { sessionsPerTank: 0, actualCloseTime: closeTime };
+  }
+
+  let maxSessionsPerTank = 0;
+  let latestEndTime = openMinutes;
+
+  for (let tankIndex = 0; tankIndex < numberOfTanks; tankIndex++) {
+    const tankStartMinutes = openMinutes + (tankIndex * Number(staggerInterval || 0));
+    const availableTime = closeMinutes - tankStartMinutes;
+    const tankSessions = Math.floor(availableTime / sessionLength);
+    
+    if (tankSessions > 0) {
+      const tankEndTime = tankStartMinutes + (tankSessions * sessionLength);
+      latestEndTime = Math.max(latestEndTime, tankEndTime);
+      maxSessionsPerTank = Math.max(maxSessionsPerTank, tankSessions);
+    }
+  }
+
+  return {
+    sessionsPerTank: maxSessionsPerTank || 0,
+    actualCloseTime: minutesToTime(latestEndTime)
+  };
+};
+
+const generateSessionDetails = (
+  settings: SystemSettings,
+  tanks: Tank[]
+): SessionDetail[] => {
+  const readyTanks = tanks.filter(t => t.status === "Ready");
+  const sessionDetails: SessionDetail[] = [];
+
+  const timeToMinutes = (time: string): number => {
+    try {
+      const [hours, minutes] = time.split(':').map(Number);
+      if (isNaN(hours) || isNaN(minutes)) return 0;
+      return hours * 60 + minutes;
+    } catch {
+      return 0;
+    }
+  };
+
+  const minutesToTime = (minutes: number): string => {
+    if (isNaN(minutes)) return "00:00";
+    const hrs = Math.floor(minutes / 60) % 24;
+    const mins = minutes % 60;
+    return `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+  };
+
+  const openMinutes = timeToMinutes(settings.openTime);
+  const sessionDuration = Number(settings.sessionDuration) || 0;
+  const cleaningBuffer = Number(settings.cleaningBuffer) || 0;
+  const staggerInterval = Number(settings.tankStaggerInterval) || 0;
+  const sessionLength = sessionDuration + cleaningBuffer;
+
+  if (sessionLength <= 0) return [];
+
+  const result = calculateStaggeredSessions(
+    settings.openTime,
+    settings.closeTime,
+    sessionDuration,
+    cleaningBuffer,
+    readyTanks.length,
+    staggerInterval
+  );
+
+  readyTanks.forEach((tank, tankIndex) => {
+    const tankStartMinutes = openMinutes + (tankIndex * staggerInterval);
+    const sessions = [];
+
+    for (let i = 0; i < result.sessionsPerTank; i++) {
+      const sessionStartMinutes = tankStartMinutes + (i * sessionLength);
+      const sessionEndMinutes = sessionStartMinutes + sessionDuration;
+      const cleaningEndMinutes = sessionEndMinutes + cleaningBuffer;
+
+      sessions.push({
+        sessionNumber: i + 1,
+        startTime: minutesToTime(sessionStartMinutes),
+        endTime: minutesToTime(sessionEndMinutes),
+        cleaningStart: minutesToTime(sessionEndMinutes),
+        cleaningEnd: minutesToTime(cleaningEndMinutes),
+      });
+    }
+
+    sessionDetails.push({
+      tankNumber: tankIndex + 1,
+      tankName: tank.name,
+      sessions,
+    });
+  });
+
+  return sessionDetails;
+};
+
+// --- DAY CONFIGURATION MODAL ---
+interface DayConfigModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  dayData: DayData | null;
+  settings: SystemSettings;
+  readyTankCount: number;
+  onSave: () => void;
 }
 
-// --- UI COMPONENTS ---
-interface DaySettingsSidebarProps {
-  isOpen: boolean
-  onClose: () => void
-  dayData: FacilityDayData | null 
-  onSave: () => Promise<void> 
-  readyTankCount: number
-  cycleDuration: number // Passed from App component
-}
-
-const DaySettingsSidebar: React.FC<DaySettingsSidebarProps> = ({
+const DayConfigModal: React.FC<DayConfigModalProps> = ({
   isOpen,
   onClose,
   dayData,
-  onSave,
+  settings,
   readyTankCount,
-  cycleDuration, // Used here
+  onSave,
 }) => {
-  const [openTime, setOpenTime] = useState(dayData?.hours.open || DEFAULT_SYSTEM_SETTINGS.openTime)
-  const [closeTime, setCloseTime] = useState(dayData?.hours.close || DEFAULT_SYSTEM_SETTINGS.closeTime)
-  const [status, setStatus] = useState<DayStatus>(dayData?.status || DAY_STATUS.BOOKABLE)
-  const [isSaving, setIsSaving] = useState(false)
-  
-  // Recalculate sessions using current local state times and fetched global cycle duration
-  const maxSessionsPerTank = useMemo(() => {
-    // Note: We need the individual session and buffer times, not the cycle duration.
-    // If the systemSettings is available in the main App, we should pass those too.
-    // For now, relying on the calculation in the main component.
-    
-    // For calculating max sessions in the sidebar, we'll use the hardcoded/default duration values
-    // as we don't have access to systemSettings.sessionDuration/cleaningBuffer here directly.
-    // However, since we rely on 'cycleDuration' passed from App, we should use a consistent calculation.
-    // Let's rely on the cycleDuration passed from the parent for consistency.
-    
-    if (cycleDuration <= 0) return 0;
-
-    try {
-      const fixedDate = "2000/01/01"
-      const open = new Date(`${fixedDate} ${openTime}`)
-      const close = new Date(`${fixedDate} ${closeTime}`)
-      if (close.getTime() <= open.getTime()) return 0
-      const durationMinutes = (close.getTime() - open.getTime()) / (60 * 1000)
-      return Math.floor(durationMinutes / cycleDuration)
-    } catch (e) {
-      return 0
-    }
-  }, [openTime, closeTime, cycleDuration])
-  
-  const calculatedFacilitySessions = maxSessionsPerTank * readyTankCount
+  const [status, setStatus] = useState<DayStatus>("Bookable");
+  const [openTime, setOpenTime] = useState("");
+  const [closeTime, setCloseTime] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     if (dayData) {
-      setOpenTime(dayData.hours.open)
-      setCloseTime(dayData.hours.close)
-      setStatus(dayData.status)
+      setStatus(dayData.status);
+      setOpenTime(dayData.openTime || settings.openTime);
+      setCloseTime(dayData.closeTime || settings.closeTime);
     }
-  }, [dayData])
+  }, [dayData, settings]);
 
-  const handleSave = async (e: FormEvent) => {
-    e.preventDefault()
-    if (!dayData) return
+  const calculatedSessions = useMemo(() => {
+    if (status !== "Bookable" || !openTime || !closeTime) return 0;
+    
+    const result = calculateStaggeredSessions(
+      openTime,
+      closeTime,
+      settings.sessionDuration,
+      settings.cleaningBuffer,
+      readyTankCount,
+      settings.tankStaggerInterval
+    );
+    
+    const total = result.sessionsPerTank * readyTankCount;
+    return isNaN(total) ? 0 : total;
+  }, [openTime, closeTime, status, settings, readyTankCount]);
 
-    if (status === DAY_STATUS.BOOKABLE) {
-      if (!openTime || !closeTime) {
-        Swal.fire({
-          icon: "warning",
-          title: "Validation Error",
-          text: "Open and Close times are required for a Bookable status.",
-        })
-        return
-      }
-      if (maxSessionsPerTank <= 0) {
-        Swal.fire({
-          icon: "warning",
-          title: "Validation Error",
-          text: `Operating hours must allow at least one full session + cleaning cycle (${cycleDuration} minutes).`,
-        })
-        return
-      }
+  const handleSave = async () => {
+    if (!dayData) return;
+
+    if (status === "Bookable" && (!openTime || !closeTime)) {
+      Swal.fire({
+        icon: "warning",
+        title: "Validation Error",
+        text: "Please set operating hours for bookable days.",
+      });
+      return;
     }
 
-    const finalSessionsToSell = status === DAY_STATUS.BOOKABLE ? calculatedFacilitySessions : 0
-    setIsSaving(true)
+    setIsSaving(true);
     try {
-      const success = await apiService.updateFacilityStatus(
+      const sessionsToSell = status === "Bookable" ? calculatedSessions : 0;
+      const success = await apiService.updateDayStatus(
         dayData.date,
         status,
-        openTime,
-        closeTime,
-        finalSessionsToSell,
-      )
+        openTime || settings.openTime,
+        closeTime || settings.closeTime,
+        sessionsToSell
+      );
+
       if (success) {
         Swal.fire({
           icon: "success",
-          title: "Settings Updated",
-          text: "Facility day settings have been updated successfully.",
+          title: "Success",
+          text: "Day settings updated successfully!",
           toast: true,
           position: "top-end",
-          showConfirmButton: false,
           timer: 2000,
-        })
-        await onSave()
-        onClose()
-      } else {
-        Swal.fire({
-          icon: "error",
-          title: "Save Failed",
-          text: "Failed to save changes due to a server policy error.",
-        })
+          showConfirmButton: false,
+        });
+        onSave();
+        onClose();
       }
-    } catch (e: any) {
-      const displayError = e.message || "An unexpected network or server error occurred."
+    } catch (error) {
       Swal.fire({
         icon: "error",
         title: "Error",
-        text: displayError,
-      })
+        text: "Failed to update day settings.",
+      });
     } finally {
-      setIsSaving(false)
+      setIsSaving(false);
     }
-  }
+  };
 
-  if (!dayData) return null 
-
-  const sidebarClass = `fixed inset-y-0 right-0 w-80 bg-white p-6 shadow-2xl transition-transform duration-300 ease-in-out z-[100] ${isOpen ? "translate-x-0" : "translate-x-full"}`
-  const formattedDate = _format(new Date(dayData.date), "EEEE, MMMM do, yyyy")
+  if (!isOpen || !dayData) return null;
 
   return (
     <>
-      <div className={sidebarClass}>
-        <div className="flex justify-between items-center pb-4 border-b">
-          <h2 className="text-xl font-semibold text-gray-800">Facility Day Settings</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-2 rounded-full">
-            <X className="h-6 w-6" />
-          </button>
-        </div>
-        <form onSubmit={handleSave} className="mt-4 space-y-4 h-[calc(100%-60px)] flex flex-col">
-          <h3 className="text-lg font-bold text-gray-700">{formattedDate}</h3>
-          <p className="text-sm text-gray-500">
-            This update sets the **status and hours for ALL {readyTankCount} ready tanks**.
-          </p>
-          <div className="space-y-2">
-            <label htmlFor="status" className="block text-sm font-medium text-gray-700">
-              Facility Status
-            </label>
-            <div className="flex space-x-2">
-              <button
-                type="button"
-                onClick={() => setStatus(DAY_STATUS.BOOKABLE)}
-                className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${status === DAY_STATUS.BOOKABLE ? "bg-green-100 text-green-700 border border-green-300" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
-              >
-                <CheckCircle className="inline h-4 w-4 mr-1" /> Open
-              </button>
-              <button
-                type="button"
-                onClick={() => setStatus(DAY_STATUS.CLOSED)}
-                className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${status === DAY_STATUS.CLOSED ? "bg-red-100 text-red-700 border border-red-300" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
-              >
-                <XCircle className="inline h-4 w-4 mr-1" /> Closed
-              </button>
-            </div>
-          </div>
-          {status === DAY_STATUS.BOOKABLE && (
-            <div className="space-y-4 pt-2">
-              <h4 className="text-base font-medium text-gray-700 flex items-center">
-                <Clock className="h-4 w-4 mr-2" /> Operating Hours
-              </h4>
-              <div className="flex gap-4">
-                <div>
-                  <label htmlFor="openTime" className="block text-sm font-medium text-gray-700">
-                    Open Time
-                  </label>
-                  <input
-                    id="openTime"
-                    type="time"
-                    value={openTime}
-                    onChange={(e: ChangeEvent<HTMLInputElement>) => setOpenTime(e.target.value)}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2"
-                    required
-                  />
-                </div>
-                <div>
-                  <label htmlFor="closeTime" className="block text-sm font-medium text-gray-700">
-                    Close Time
-                  </label>
-                  <input
-                    id="closeTime"
-                    type="time"
-                    value={closeTime}
-                    onChange={(e: ChangeEvent<HTMLInputElement>) => setCloseTime(e.target.value)}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2"
-                    required
-                  />
-                </div>
+      <div className="fixed inset-0 bg-black bg-opacity-50 z-50 backdrop-blur-sm" onClick={onClose} />
+      <div className="fixed inset-y-0 right-0 w-full md:w-96 shadow-2xl z-50 overflow-y-auto" style={{ backgroundColor: COLORS.white }}>
+        <div className="p-6">
+          {/* Header */}
+          <div className="flex items-center justify-between mb-6 pb-4 border-b" style={{ borderColor: COLORS.gray200 }}>
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg" style={{ backgroundColor: `${COLORS.primary}15` }}>
+                <CalendarDays className="w-5 h-5" style={{ color: COLORS.primary }} />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">
-                  Calculated Total Sessions ({readyTankCount} ready tanks * {cycleDuration} min cycle)
-                </label>
-                <div className="mt-1 block w-full rounded-md bg-gray-100 border border-gray-300 shadow-sm p-2 text-lg font-bold text-blue-700">
-                  {calculatedFacilitySessions}
+              <h2 className="text-xl font-bold" style={{ color: COLORS.gray800 }}>
+                Configure Day
+              </h2>
+            </div>
+            <button
+              onClick={onClose}
+              className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
+            >
+              <X className="w-5 h-5" style={{ color: COLORS.gray600 }} />
+            </button>
+          </div>
+
+          {/* Date Display */}
+          <div className="mb-6 p-4 rounded-xl" style={{ backgroundColor: COLORS.gray50 }}>
+            <p className="text-xs font-semibold mb-1" style={{ color: COLORS.gray600 }}>SELECTED DATE</p>
+            <p className="text-lg font-bold" style={{ color: COLORS.gray800 }}>
+              {dayData.date && formatDate(dayData.date, "full")}
+            </p>
+          </div>
+
+          {/* Current Status Info */}
+          {dayData.bookedSessions > 0 && (
+            <div className="mb-6 p-4 rounded-xl border-2" style={{ 
+              backgroundColor: `${COLORS.warning}10`,
+              borderColor: COLORS.warning 
+            }}>
+              <div className="flex items-start gap-3">
+                <AlertCircle className="w-5 h-5 mt-0.5 flex-shrink-0" style={{ color: COLORS.warning }} />
+                <div>
+                  <p className="text-sm font-bold" style={{ color: COLORS.warning }}>
+                    Active Bookings
+                  </p>
+                  <p className="text-xs mt-1" style={{ color: COLORS.gray700 }}>
+                    This day has <strong>{dayData.bookedSessions}</strong> confirmed booking{dayData.bookedSessions !== 1 ? 's' : ''}
+                  </p>
                 </div>
-                <p className="text-xs text-gray-500 mt-1">
-                  Max sessions calculated based on hours for all ready tanks.
-                </p>
               </div>
             </div>
           )}
-          <div className="mt-auto pt-4 border-t">
-            <button
-              type="submit"
-              disabled={isSaving}
-              className="w-full flex items-center justify-center py-3 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-blue-400"
-            >
-              <Save className="h-5 w-5 mr-2" />
-              {isSaving ? "Applying Globally..." : "Apply Status & Hours"}
-            </button>
-          </div>
-        </form>
-      </div>
-      {isOpen && <div className="fixed inset-0 z-[99] bg-black bg-opacity-25" onClick={onClose} />}
-    </>
-  )
-}
 
-interface DateRangeDisplayProps {
-  startDate: Date | null
-  endDate: Date | null
-  onStartDateChange: (date: Date) => void
-  onEndDateChange: (date: Date) => void
-}
-
-const DateRangeDisplay: React.FC<DateRangeDisplayProps> = ({
-  startDate,
-  endDate,
-  onStartDateChange,
-  onEndDateChange,
-}) => {
-  const [isOpen, setIsOpen] = useState(false)
-  const [mode, setMode] = useState<"start" | "end">("start")
-  const [currentMonth, setCurrentMonth] = useState(new Date())
-
-  const getDaysInCalendar = () => {
-    const firstDay = _getFirstDayOfMonth(currentMonth)
-    const daysInMonth = _getDaysInMonth(currentMonth)
-    const days = []
-    for (let i = 0; i < firstDay; i++) {
-      days.push(null)
-    }
-    for (let i = 1; i <= daysInMonth; i++) {
-      const date = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), i)
-      days.push(date)
-    }
-    return days
-  }
-
-  const handleDayClick = (day: Date | null) => {
-    if (!day) return
-    if (mode === "start") {
-      onStartDateChange(day)
-      setMode("end")
-    } else {
-      if (startDate && day < startDate) {
-        onEndDateChange(startDate)
-        onStartDateChange(day)
-      } else {
-        onEndDateChange(day)
-      }
-      setIsOpen(false)
-    }
-  }
-
-  const handleClear = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    onStartDateChange(_startOfDay(new Date()))
-    onEndDateChange(_startOfDay(new Date()))
-    setMode("start")
-    setIsOpen(false)
-  }
-
-  let displayValue = "Select a date range"
-  if (startDate && endDate) {
-    displayValue = `${_format(startDate, "yyyy-MM-dd")} — ${_format(endDate, "yyyy-MM-dd")}`
-  } else if (startDate) {
-    displayValue = `${_format(startDate, "yyyy-MM-dd")} — ...`
-  }
-
-  const today = _startOfDay(new Date())
-  const calendarDays = getDaysInCalendar()
-
-  return (
-    <div className="relative w-72">
-      <div
-        className="relative flex items-center bg-white border border-gray-300 rounded-lg shadow-sm w-full h-[46px] cursor-pointer hover:border-gray-400 transition-colors"
-        onClick={() => setIsOpen(!isOpen)}
-      >
-        <CalendarIcon className="absolute left-3 h-5 w-5 text-gray-400 z-10 pointer-events-none" />
-        <span className="pl-10 pr-10 py-2 w-full text-center text-sm text-gray-800 font-medium overflow-hidden text-ellipsis whitespace-nowrap">
-          {displayValue}
-        </span>
-        {(startDate || endDate) && (
-          <button
-            onClick={handleClear}
-            className="absolute right-2 p-1 hover:bg-gray-100 rounded-full transition-colors"
-            aria-label="Clear dates"
-          >
-            <X className="h-4 w-4 text-gray-400 hover:text-gray-600" />
-          </button>
-        )}
-      </div>
-      {isOpen && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)} />
-          <div className="absolute top-full left-0 mt-2 bg-white border border-gray-300 rounded-lg shadow-lg p-4 z-50 w-80">
-            <div className="space-y-4">
-              <div className="text-sm font-semibold text-gray-700">
-                {mode === "start" ? "Select Start Date" : "Select End Date"}
-              </div>
-              <div className="flex items-center justify-between mb-4">
-                <button
-                  onClick={() => setCurrentMonth(_addDays(currentMonth, -32))}
-                  className="p-1 hover:bg-gray-100 rounded"
-                >
-                  <ChevronLeft className="h-5 w-5" />
-                </button>
-                <span className="font-medium">
-                  {_format(currentMonth, "MMMM yyyy").split(",")[0].split(" ").slice(0, 2).join(" ")}{" "}
-                  {currentMonth.getFullYear()}
-                </span>
-                <button
-                  onClick={() => setCurrentMonth(_addDays(currentMonth, 32))}
-                  className="p-1 hover:bg-gray-100 rounded"
-                >
-                  <ChevronRight className="h-5 w-5" />
-                </button>
-              </div>
-              <div className="grid grid-cols-7 gap-2 text-center">
-                {["S", "M", "T", "W", "T", "F", "S"].map((day) => (
-                  <div key={day} className="text-xs font-semibold text-gray-500">
-                    {day}
-                  </div>
-                ))}
-                {calendarDays.map((day, idx) => {
-                  const isToday = day && _isSameDay(day, today)
-                  const isPastDate = day && day < today
-                  const isStartDate = day && startDate && _isSameDay(day, startDate)
-                  const isEndDate = day && endDate && _isSameDay(day, endDate)
-                  const isInRange = day && startDate && endDate && day > startDate && day < endDate
-                  const isInvalidEnd = day && mode === "end" && startDate && day < startDate
-                  return (
-                    <button
-                      key={idx}
-                      onClick={() => day && !isPastDate && !isInvalidEnd && handleDayClick(day)}
-                      disabled={Boolean(!day || isPastDate || isInvalidEnd)}
-                      className={`p-2 rounded text-sm font-medium transition-colors ${
-                        !day || isPastDate || isInvalidEnd
-                          ? "text-gray-300 cursor-not-allowed"
-                          : isStartDate || isEndDate
-                            ? "bg-blue-600 text-white hover:bg-blue-700"
-                            : isInRange
-                              ? "bg-blue-100 text-blue-700"
-                              : isToday
-                                ? "border-2 border-blue-600 text-gray-700 hover:bg-blue-50"
-                                : "text-gray-700 hover:bg-gray-100"
-                      }`}
-                    >
-                      {day?.getDate()}
-                    </button>
-                  )
-                })}
-              </div>
-              <div className="border-t pt-4 space-y-2">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-gray-600">Start:</span>
-                  <span className="font-medium">{startDate ? _format(startDate, "yyyy-MM-dd") : "Not set"}</span>
-                </div>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-gray-600">End:</span>
-                  <span className="font-medium">{endDate ? _format(endDate, "yyyy-MM-dd") : "Not set"}</span>
-                </div>
-                {startDate && (
-                  <button
-                    onClick={() => setMode(mode === "start" ? "end" : "start")}
-                    className="w-full mt-2 py-2 px-3 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
-                  >
-                    {mode === "start" ? "Switch to End Date" : "Switch to Start Date"}
-                  </button>
-                )}
-                {startDate && endDate && (
-                  <button
-                    onClick={() => setIsOpen(false)}
-                    className="w-full mt-2 py-2 px-3 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
-                  >
-                    Confirm
-                  </button>
-                )}
-              </div>
+          {/* Status Selection */}
+          <div className="mb-6">
+            <label className="block text-sm font-bold mb-3" style={{ color: COLORS.gray800 }}>
+              Day Status
+            </label>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setStatus("Bookable")}
+                className={`p-4 rounded-xl border-2 transition-all transform hover:scale-105 ${
+                  status === "Bookable"
+                    ? "shadow-lg"
+                    : "hover:shadow-md"
+                }`}
+                style={{
+                  borderColor: status === "Bookable" ? COLORS.success : COLORS.gray200,
+                  backgroundColor: status === "Bookable" ? `${COLORS.success}15` : COLORS.white,
+                }}
+              >
+                <CheckCircle2 className={`w-8 h-8 mx-auto mb-2 ${
+                  status === "Bookable" ? "" : "opacity-40"
+                }`} style={{ color: COLORS.success }} />
+                <p className={`text-sm font-bold ${
+                  status === "Bookable" ? "" : "opacity-60"
+                }`} style={{ color: status === "Bookable" ? COLORS.success : COLORS.gray600 }}>
+                  Open
+                </p>
+              </button>
+              <button
+                type="button"
+                onClick={() => setStatus("Closed")}
+                className={`p-4 rounded-xl border-2 transition-all transform hover:scale-105 ${
+                  status === "Closed"
+                    ? "shadow-lg"
+                    : "hover:shadow-md"
+                }`}
+                style={{
+                  borderColor: status === "Closed" ? COLORS.error : COLORS.gray200,
+                  backgroundColor: status === "Closed" ? `${COLORS.error}15` : COLORS.white,
+                }}
+              >
+                <XCircle className={`w-8 h-8 mx-auto mb-2 ${
+                  status === "Closed" ? "" : "opacity-40"
+                }`} style={{ color: COLORS.error }} />
+                <p className={`text-sm font-bold ${
+                  status === "Closed" ? "" : "opacity-60"
+                }`} style={{ color: status === "Closed" ? COLORS.error : COLORS.gray600 }}>
+                  Closed
+                </p>
+              </button>
             </div>
           </div>
-        </>
-      )}
-    </div>
-  )
-}
 
-// --- MAIN APP COMPONENT ---
-const App: React.FC = () => {
-  const initialStartDate = _startOfDay(new Date())
-  const initialEndDate = _startOfDay(_addDays(new Date(), 29))
-  const [startDate, setStartDate] = useState<Date>(initialStartDate)
-  const [endDate, setEndDate] = useState<Date>(initialEndDate)
-  const [calendarDays, setCalendarDays] = useState<FacilityDayData[]>([])
-  const [loading, setLoading] = useState(true)
-  const [tanks, setTanks] = useState<Tank[]>([])
-  const [systemSettings, setSystemSettings] = useState<SystemSettings | null>(null) 
+          {/* Operating Hours */}
+          {status === "Bookable" && (
+            <div className="mb-6">
+              <label className="block text-sm font-bold mb-3" style={{ color: COLORS.gray800 }}>
+                <Clock className="w-4 h-4 inline mr-2" />
+                Operating Hours
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold mb-2" style={{ color: COLORS.gray600 }}>
+                    OPEN TIME
+                  </label>
+                  <input
+                    type="time"
+                    value={openTime}
+                    onChange={(e) => setOpenTime(e.target.value)}
+                    className="w-full px-3 py-3 border-2 rounded-lg focus:ring-2 transition-all font-semibold"
+                    style={{ 
+                      borderColor: COLORS.gray300,
+                      color: COLORS.gray800,
+                    }}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold mb-2" style={{ color: COLORS.gray600 }}>
+                    CLOSE TIME
+                  </label>
+                  <input
+                    type="time"
+                    value={closeTime}
+                    onChange={(e) => setCloseTime(e.target.value)}
+                    className="w-full px-3 py-3 border-2 rounded-lg focus:ring-2 transition-all font-semibold"
+                    style={{ 
+                      borderColor: COLORS.gray300,
+                      color: COLORS.gray800,
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
 
-  const readyTankCount = useMemo(() => {
-    return tanks.filter((tank) => tank.status === "Ready").length
-  }, [tanks])
-  
-  // Calculate Cycle Duration based on fetched settings
-  const totalCycleMinutes = useMemo(() => {
-    if (!systemSettings) return 0;
-    return systemSettings.sessionDuration + systemSettings.cleaningBuffer;
-  }, [systemSettings]);
+          {/* Calculated Sessions */}
+          {status === "Bookable" && (
+            <div className="mb-6 p-5 rounded-xl border-2" style={{ 
+              backgroundColor: `${COLORS.primary}08`,
+              borderColor: COLORS.primary 
+            }}>
+              <div className="flex items-center gap-2 mb-2">
+                <Sparkles className="w-4 h-4" style={{ color: COLORS.primary }} />
+                <p className="text-xs font-bold" style={{ color: COLORS.gray600 }}>
+                  CALCULATED SESSIONS
+                </p>
+              </div>
+              <p className="text-4xl font-bold mb-2" style={{ color: COLORS.primary }}>
+                {calculatedSessions}
+              </p>
+              <p className="text-xs font-medium" style={{ color: COLORS.gray600 }}>
+                Based on {readyTankCount} ready tank{readyTankCount !== 1 ? 's' : ''}
+              </p>
+            </div>
+          )}
 
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
-  const [selectedDayData, setSelectedDayData] = useState<FacilityDayData | null>(null)
-
-  // 1. Fetch Tanks and Settings first
-  const fetchInitialData = useCallback(async () => {
-    setLoading(true)
-    const [fetchedSettings, fetchedTanks] = await Promise.all([
-      apiService.getSystemSettings(),
-      apiService.getAllTanks(),
-    ])
-    setSystemSettings(fetchedSettings)
-    setTanks(fetchedTanks)
-    setLoading(false)
-  }, [])
-
-  useEffect(() => {
-    fetchInitialData()
-  }, [fetchInitialData])
-
-  // 2. Fetch Calendar Data after tanks and settings are loaded
-  const fetchCalendarData = useCallback(
-    async (isInitialLoad = false) => {
-      if (!systemSettings || loading) return
-
-      if (isInitialLoad) setLoading(true)
-
-      const currentReadyTankCount = tanks.filter((tank) => tank.status === "Ready").length
-      
-      const { openTime: defaultOpenTime, closeTime: defaultCloseTime, sessionDuration, cleaningBuffer } = systemSettings;
-      
-      try {
-        const formattedStartDate = _format(startDate, "yyyy-MM-dd")
-        const formattedEndDate = _format(endDate, "yyyy-MM-dd")
-        const facilityOverrides = await apiService.getCalendarOverrides(formattedStartDate, formattedEndDate)
-
-        const dates: Date[] = []
-        let currentDate = _startOfDay(startDate)
-        const end = _endOfDay(endDate)
-        while (currentDate.getTime() < end.getTime()) {
-          dates.push(currentDate)
-          currentDate = _addDays(currentDate, 1)
-        }
-
-        const newCalendarDays: FacilityDayData[] = dates.map((date) => {
-          const dateKey = _format(date, "yyyy-MM-dd")
-          const facilityRecord = facilityOverrides.find((o) => o.date === dateKey)
-
-          // Use system defaults as a base for the day
-          let status: DayStatus = DAY_STATUS.BOOKABLE
-          let openTime = defaultOpenTime
-          let closeTime = defaultCloseTime
-          let totalSessionsToSell = 0
-          let totalBookedSessions = 0
-          
-          // Apply override if it exists
-          if (facilityRecord) {
-            status = facilityRecord.status
-            openTime = facilityRecord.openTime || defaultOpenTime
-            closeTime = facilityRecord.closeTime || defaultCloseTime
-            totalSessionsToSell = facilityRecord.sessionsToSell
-            totalBookedSessions = facilityRecord.bookedSessions
-          } 
-          
-          // Calculate sessions based on effective hours and dynamic duration settings
-          const sessionsPerTank = calculateSessionCountPerTank(
-            openTime, 
-            closeTime, 
-            sessionDuration, 
-            cleaningBuffer
-          )
-          
-          // If no override, recalculate sessionsToSell based on tank count
-          if (!facilityRecord) {
-             totalSessionsToSell = sessionsPerTank * currentReadyTankCount
-          }
-
-          let totalAvailableSessions = totalSessionsToSell - totalBookedSessions
-          
-          if (status === DAY_STATUS.CLOSED) {
-            totalAvailableSessions = 0
-            totalSessionsToSell = 0
-          } else if (totalAvailableSessions <= 0 && totalSessionsToSell > 0) {
-            status = DAY_STATUS.SOLD_OUT
-            totalAvailableSessions = 0
-          }
-
-          return {
-            date: dateKey,
-            status: status,
-            hours: { open: openTime, close: closeTime },
-            totalAvailableSessions,
-            totalBookedSessions,
-            overrideData: facilityRecord ? [facilityRecord] : [],
-            cycleDuration: sessionDuration + cleaningBuffer, // Pass cycle duration for UI clarity
-          }
-        })
-        setCalendarDays(newCalendarDays)
-      } catch (err) {
-        console.error("Failed to process calendar data:", err)
-        setCalendarDays([])
-      } finally {
-        if (isInitialLoad) setLoading(false)
-      }
-    },
-    [startDate, endDate, tanks, systemSettings, loading],
-  )
-
-  useEffect(() => {
-    if (systemSettings) {
-        fetchCalendarData(false) 
-    }
-  }, [startDate, endDate, readyTankCount, systemSettings, fetchCalendarData])
-
-  const navigateDateRange = (direction: "prev" | "next") => {
-    if (!startDate || !endDate) return
-    const rangeDurationDays = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1
-    let newStart, newEnd
-    if (direction === "next") {
-      newStart = _addDays(startDate, rangeDurationDays)
-      newEnd = _addDays(endDate, rangeDurationDays)
-    } else {
-      newStart = _subDays(startDate, rangeDurationDays)
-      newEnd = _subDays(endDate, rangeDurationDays)
-      const today = _startOfDay(new Date())
-      if (newEnd < today) {
-        newStart = today
-        newEnd = _addDays(today, rangeDurationDays - 1)
-      }
-    }
-    setStartDate(newStart)
-    setEndDate(newEnd)
-  }
-
-  const openDaySettings = (dayData: FacilityDayData) => {
-    setSelectedDayData(dayData)
-    setIsSidebarOpen(true)
-  }
-
-  const toggleDayStatus = async (dayData: FacilityDayData) => {
-    if (!dayData || !dayData.date || !systemSettings) return
-    if (dayData.status === DAY_STATUS.SOLD_OUT) return
-
-    const newStatus: DayStatus = dayData.status === DAY_STATUS.CLOSED ? DAY_STATUS.BOOKABLE : DAY_STATUS.CLOSED
-    
-    // Recalculate sessions using current day hours and dynamic duration settings
-    const sessionsPerTank = calculateSessionCountPerTank(
-        dayData.hours.open, 
-        dayData.hours.close, 
-        systemSettings.sessionDuration, 
-        systemSettings.cleaningBuffer
-    )
-    const calculatedFacilitySessions = sessionsPerTank * readyTankCount
-    
-    const sessionsToSend = newStatus === DAY_STATUS.CLOSED ? 0 : calculatedFacilitySessions
-
-    try {
-      await apiService.updateFacilityStatus(
-        dayData.date,
-        newStatus,
-        dayData.hours.open,
-        dayData.hours.close,
-        sessionsToSend,
-      )
-      Swal.fire({
-        icon: "success",
-        title: "Status Updated",
-        text: `Day status changed to ${newStatus}`,
-        toast: true,
-        position: "top-end",
-        showConfirmButton: false,
-        timer: 2000,
-      })
-      fetchCalendarData()
-    } catch (e) {
-      Swal.fire({
-        icon: "error",
-        title: "Failed to Toggle Status",
-        text: "Could not update the day status. Please try again.",
-      })
-    }
-  }
-
-  const getStatusColor = (status: DayStatus): string => {
-    switch (status) {
-      case DAY_STATUS.BOOKABLE:
-        return "bg-green-100 text-green-700 hover:bg-green-200"
-      case DAY_STATUS.CLOSED:
-        return "bg-red-100 text-red-700 hover:bg-red-200"
-      case DAY_STATUS.SOLD_OUT:
-        return "bg-yellow-100 text-yellow-700 hover:bg-yellow-200"
-      default:
-        return "bg-gray-100 text-gray-700"
-    }
-  }
-
-  const dates = useMemo(() => {
-    if (!startDate || !endDate) return []
-    const days: Date[] = []
-    let currentDate = _startOfDay(startDate)
-    const end = _endOfDay(endDate)
-    while (currentDate.getTime() < end.getTime()) {
-      days.push(currentDate)
-      currentDate = _addDays(currentDate, 1)
-    }
-    return days
-  }, [startDate, endDate])
-
-  const daysCount = dates.length
-
-  const getCellWidth = (): string => {
-    if (daysCount <= 7) return "w-32"
-    if (daysCount <= 14) return "w-24"
-    return "w-20"
-  }
-  
-  const isDataReady = !loading && systemSettings !== null
-
-  return (
-    <div className="min-h-screen bg-gray-50 font-sans antialiased">
-      {/* Sticky Header with Date Range Selector and Navigation */}
-      <div className="sticky top-0 p-4 z-30 bg-white shadow-md border-b border-gray-100">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between">
-          {/* Title */}
-          <div className="mb-4 md:mb-0">
-            <h1 className="text-3xl font-extrabold text-gray-900 flex items-center">
-              <CalendarIcon className="h-7 w-7 mr-3 text-blue-600" />
-              Tank Reservation Calendar
-            </h1>
-            <p className="text-sm text-gray-500 mt-1">
-              Manage availability and bookings for your floating therapy pods (Facility-Wide View).
-            </p>
-          </div>
-          {/* Date Navigation and Display */}
-          <div className="flex items-center space-x-3">
-            {/* Prev Button */}
+          {/* Action Buttons */}
+          <div className="flex gap-3">
             <button
-              onClick={() => navigateDateRange("prev")}
-              disabled={_isSameDay(_startOfDay(startDate), _startOfDay(new Date()))}
-              className="p-2 border border-gray-300 rounded-full text-gray-500 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              aria-label="Previous range"
+              onClick={onClose}
+              className="flex-1 py-3 rounded-xl border-2 font-bold transition-all hover:bg-gray-50 transform hover:scale-105"
+              style={{ borderColor: COLORS.gray300, color: COLORS.gray700 }}
             >
-              <ChevronLeft className="h-5 w-5" />
+              Cancel
             </button>
-            <DateRangeDisplay
-              startDate={startDate}
-              endDate={endDate}
-              onStartDateChange={setStartDate}
-              onEndDateChange={setEndDate}
-            />
-            {/* Next Button */}
             <button
-              onClick={() => navigateDateRange("next")}
-              className="p-2 border border-gray-300 rounded-full text-gray-500 hover:bg-gray-100 transition-colors"
-              aria-label="Next range"
+              onClick={handleSave}
+              disabled={isSaving}
+              className="flex-1 py-3 rounded-xl font-bold text-white transition-all shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 transform hover:scale-105"
+              style={{ backgroundColor: COLORS.primary }}
             >
-              <ChevronRight className="h-5 w-5" />
+              <Save className="w-4 h-4" />
+              {isSaving ? "Saving..." : "Save Changes"}
             </button>
           </div>
         </div>
       </div>
+    </>
+  );
+};
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {!isDataReady ? (
-          <div className="text-center py-20 text-xl font-medium text-gray-500">
-            <span className="animate-pulse">Loading settings and tanks...</span>
-          </div>
-        ) : (
-          <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
-            <div className="p-4 flex justify-between items-center border-b">
-              <h2 className="text-xl font-bold text-gray-800 flex items-center">
-                <Zap className="h-5 w-5 mr-2 text-blue-500" />
-                Facility Calendar View ({readyTankCount} Ready Tanks Combined)
-              </h2>
-            </div>
-            <div className="overflow-x-auto relative">
-              <table className="min-w-full divide-y divide-gray-200 border-collapse">
-                <thead>
-                  <tr className="bg-gray-50 sticky top-0 z-20">
-                    <th className="sticky left-0 bg-gray-50 p-3 text-left text-xs font-semibold text-gray-600 uppercase w-32 min-w-[128px] border-r border-gray-200 shadow-inner-right">
-                      Dates
-                    </th>
-                    {dates.map((date, index) => {
-                      const formattedDate = _format(date, "MMM dd")
-                      const dayOfWeek = _format(date, "EEE")
-                      // Find the corresponding calendar data for the date
-                      const dayData =
-                        calendarDays.find((d) => d.date === _format(date, "yyyy-MM-dd")) || ({} as FacilityDayData)
-                      return (
-                        <th
-                          key={index}
-                          className={`${getCellWidth()} p-2 text-center text-xs font-semibold uppercase cursor-pointer hover:bg-blue-50 transition-colors`}
-                          onClick={() => openDaySettings(dayData)}
-                        >
-                          <div className="text-gray-900 font-bold text-sm">{formattedDate}</div>
-                          <div className="text-gray-500">{dayOfWeek}</div>
-                        </th>
-                      )
-                    })}
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr className="border-t border-gray-200">
-                    <td className="sticky left-0 bg-white p-3 text-left text-sm font-medium text-gray-800 border-r border-gray-200 shadow-inner-right whitespace-nowrap">
-                      Tank Status
-                    </td>
-                    {calendarDays.map((dayData, index) => {
-                      const canToggle = dayData.status !== DAY_STATUS.SOLD_OUT
-                      return (
-                        <td key={index} className={`${getCellWidth()} p-2 text-center`}>
-                          <button
-                            onClick={() => dayData.date && canToggle && toggleDayStatus(dayData)}
-                            disabled={Boolean(!dayData.date || !canToggle)}
-                            className={`w-full py-1.5 rounded-full text-xs font-semibold transition-colors disabled:opacity-50 ${getStatusColor(dayData.status)}`}
-                          >
-                            <span className="flex items-center justify-center">
-                              {dayData.status === DAY_STATUS.CLOSED && <Lock className="h-3 w-3 mr-1" />}
-                              {dayData.status === DAY_STATUS.BOOKABLE && <Unlock className="h-3 w-3 mr-1" />}
-                              {dayData.status === DAY_STATUS.SOLD_OUT ? "SOLD OUT" : dayData.status.toUpperCase()}
-                            </span>
-                          </button>
-                        </td>
-                      )
-                    })}
-                  </tr>
-                  <tr className="border-t border-gray-100">
-                    <td className="sticky left-0 bg-white p-3 text-left text-sm font-medium text-gray-800 border-r border-gray-200 shadow-inner-right whitespace-nowrap">
-                      Open Time
-                    </td>
-                    {calendarDays.map((dayData, index) => {
-                      const timeDisplay = dayData.hours?.open || "-"
-                      return (
-                        <td
-                          key={`open-${index}`}
-                          className={`${getCellWidth()} p-2 text-center text-sm font-medium ${dayData.status === DAY_STATUS.CLOSED ? "text-gray-400" : "text-gray-700"}`}
-                        >
-                          {dayData.status === DAY_STATUS.CLOSED ? "-" : timeDisplay}
-                        </td>
-                      )
-                    })}
-                  </tr>
-                  <tr className="border-t border-gray-100">
-                    <td className="sticky left-0 bg-white p-3 text-left text-sm font-medium text-gray-800 border-r border-gray-200 shadow-inner-right whitespace-nowrap">
-                      Close Time
-                    </td>
-                    {calendarDays.map((dayData, index) => {
-                      const timeDisplay = dayData.hours?.close || "-"
-                      return (
-                        <td
-                          key={`close-${index}`}
-                          className={`${getCellWidth()} p-2 text-center text-sm font-medium ${dayData.status === DAY_STATUS.CLOSED ? "text-gray-400" : "text-gray-700"}`}
-                        >
-                          {dayData.status === DAY_STATUS.CLOSED ? "-" : timeDisplay}
-                        </td>
-                      )
-                    })}
-                  </tr>
-                  <tr className="border-t border-gray-200">
-                    <td className="sticky left-0 bg-white p-3 text-left text-sm font-medium text-gray-800 border-r border-gray-200 shadow-inner-right whitespace-nowrap">
-                      Available Sessions
-                    </td>
-                    {calendarDays.map((dayData, index) => {
-                      const availableCount = dayData.totalAvailableSessions
-                      const isLow = availableCount > 0 && availableCount < readyTankCount
-                      return (
-                        <td
-                          key={index}
-                          className={`${getCellWidth()} p-2 text-center text-sm font-semibold ${dayData.status === DAY_STATUS.CLOSED ? "text-gray-500" : isLow ? "text-orange-600" : "text-green-600"}`}
-                        >
-                          {dayData.status === DAY_STATUS.CLOSED ? "-" : availableCount}
-                        </td>
-                      )
-                    })}
-                  </tr>
-                  <tr className="border-t border-gray-100">
-                    <td className="sticky left-0 bg-white p-3 text-left text-sm font-medium text-gray-800 border-r border-gray-200 shadow-inner-right whitespace-nowrap">
-                      Booked Sessions
-                    </td>
-                    {calendarDays.map((dayData, index) => {
-                      return (
-                        <td
-                          key={index}
-                          className={`${getCellWidth()} p-2 text-center text-sm font-semibold text-blue-600`}
-                        >
-                          {dayData.status === DAY_STATUS.CLOSED ? "-" : dayData.totalBookedSessions}
-                        </td>
-                      )
-                    })}
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
+// --- MAIN COMPONENT ---
+const CalendarManage: React.FC = () => {
+  const [currentMonth, setCurrentMonth] = useState(new Date());
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const [settings, setSettings] = useState<SystemSettings | null>(null);
+  const [tanks, setTanks] = useState<Tank[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [calendarData, setCalendarData] = useState<Map<string, DayData>>(new Map());
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
+  const readyTankCount = useMemo(() => {
+    return tanks.filter(t => t.status === "Ready").length;
+  }, [tanks]);
+
+  // Fetch initial data
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [fetchedSettings, fetchedTanks] = await Promise.all([
+        apiService.getSystemSettings(),
+        apiService.getAllTanks(),
+      ]);
+      setSettings(fetchedSettings);
+      setTanks(fetchedTanks);
+      
+      // Fetch calendar data for current month
+      const firstDay = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1);
+      const lastDay = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0);
+      const overrides = await apiService.getCalendarOverrides(
+        formatDate(firstDay, "yyyy-MM-dd"),
+        formatDate(lastDay, "yyyy-MM-dd")
+      );
+
+      // Process calendar data
+      const dataMap = new Map<string, DayData>();
+      const readyTanks = fetchedTanks.filter(t => t.status === "Ready");
+      
+      // Calculate default sessions with validation
+      const defaultResult = calculateStaggeredSessions(
+        fetchedSettings.openTime,
+        fetchedSettings.closeTime,
+        fetchedSettings.sessionDuration,
+        fetchedSettings.cleaningBuffer,
+        readyTanks.length,
+        fetchedSettings.tankStaggerInterval
+      );
+      const defaultSessions = (defaultResult.sessionsPerTank * readyTanks.length) || 0;
+
+      // Group overrides by date
+      const overridesByDate = new Map<string, CalendarOverride[]>();
+      overrides.forEach(override => {
+        if (!overridesByDate.has(override.date)) {
+          overridesByDate.set(override.date, []);
+        }
+        overridesByDate.get(override.date)!.push(override);
+      });
+
+      // Create day data for each day in month
+      for (let d = 1; d <= lastDay.getDate(); d++) {
+        const date = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), d);
+        const dateKey = formatDate(date, "yyyy-MM-dd");
+        const dayOverrides = overridesByDate.get(dateKey) || [];
+
+        if (dayOverrides.length > 0) {
+          const totalSessions = dayOverrides.reduce((sum, o) => sum + (Number(o.sessionsToSell) || 0), 0);
+          const totalBooked = dayOverrides.reduce((sum, o) => sum + (Number(o.bookedSessions) || 0), 0);
+          const firstOverride = dayOverrides[0];
+          
+          let status: DayStatus = firstOverride.status;
+          if (status === "Bookable" && totalBooked >= totalSessions && totalSessions > 0) {
+            status = "Sold Out";
+          }
+
+          dataMap.set(dateKey, {
+            date: dateKey,
+            status,
+            openTime: firstOverride.openTime || fetchedSettings.openTime,
+            closeTime: firstOverride.closeTime || fetchedSettings.closeTime,
+            totalSessions: totalSessions || 0,
+            bookedSessions: totalBooked || 0,
+            availableSessions: Math.max(0, (totalSessions || 0) - (totalBooked || 0)),
+            overrides: dayOverrides,
+          });
+        } else {
+          dataMap.set(dateKey, {
+            date: dateKey,
+            status: "Bookable",
+            openTime: fetchedSettings.openTime,
+            closeTime: fetchedSettings.closeTime,
+            totalSessions: defaultSessions,
+            bookedSessions: 0,
+            availableSessions: defaultSessions,
+            overrides: [],
+          });
+        }
+      }
+
+      setCalendarData(dataMap);
+    } catch (error) {
+      console.error("Failed to fetch data:", error);
+    } finally {
+      setLoading(false);
+    }
+  }, [currentMonth]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  // Generate calendar days
+  const calendarDays = useMemo(() => {
+    const year = currentMonth.getFullYear();
+    const month = currentMonth.getMonth();
+    const firstDay = new Date(year, month, 1).getDay();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const days: (Date | null)[] = [];
+
+    for (let i = 0; i < firstDay; i++) {
+      days.push(null);
+    }
+
+    for (let i = 1; i <= daysInMonth; i++) {
+      days.push(new Date(year, month, i));
+    }
+
+    return days;
+  }, [currentMonth]);
+
+  // Calculate stats
+  const stats = useMemo(() => {
+    if (!settings || !tanks.length) return null;
+
+    const result = calculateStaggeredSessions(
+      settings.openTime,
+      settings.closeTime,
+      settings.sessionDuration,
+      settings.cleaningBuffer,
+      readyTankCount,
+      settings.tankStaggerInterval
+    );
+
+    // Calculate monthly stats
+    let totalBookings = 0;
+    let totalAvailable = 0;
+    calendarData.forEach(day => {
+      if (day.status !== "Closed") {
+        totalBookings += Number(day.bookedSessions) || 0;
+        totalAvailable += Number(day.totalSessions) || 0;
+      }
+    });
+
+    const dailySessions = (result.sessionsPerTank * readyTankCount) || 0;
+
+    return {
+      totalDailySessions: isNaN(dailySessions) ? 0 : dailySessions,
+      sessionsPerTank: result.sessionsPerTank || 0,
+      readyTanks: readyTankCount,
+      actualCloseTime: result.actualCloseTime,
+      monthlyBookings: isNaN(totalBookings) ? 0 : totalBookings,
+      monthlyCapacity: isNaN(totalAvailable) ? 0 : totalAvailable,
+    };
+  }, [settings, tanks, readyTankCount, calendarData]);
+
+  // Generate session details for selected date using that day's specific hours
+  const sessionDetails = useMemo(() => {
+    if (!selectedDate || !settings || !tanks.length) return [];
+    
+    const dateKey = formatDate(selectedDate, "yyyy-MM-dd");
+    const dayData = calendarData.get(dateKey);
+    
+    if (!dayData || dayData.status === "Closed") return [];
+    
+    // Create a modified settings object with the day's specific hours
+    const daySpecificSettings = {
+      ...settings,
+      openTime: dayData.openTime,
+      closeTime: dayData.closeTime,
+    };
+    
+    return generateSessionDetails(daySpecificSettings, tanks);
+  }, [selectedDate, settings, tanks, calendarData]);
+
+  const handleDateClick = (date: Date) => {
+    setSelectedDate(date);
+  };
+
+  const handleMonthChange = (direction: number) => {
+    setCurrentMonth(addMonths(currentMonth, direction));
+    setSelectedDate(null);
+  };
+
+  const today = new Date();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: COLORS.gray50 }}>
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-16 w-16 border-4 border-t-transparent mx-auto mb-4" style={{ borderColor: COLORS.primary }}></div>
+          <p className="text-xl font-semibold" style={{ color: COLORS.gray600 }}>Loading calendar...</p>
+        </div>
       </div>
-      {isSidebarOpen && selectedDayData && systemSettings && (
-        <DaySettingsSidebar
-          isOpen={isSidebarOpen}
-          onClose={() => setIsSidebarOpen(false)}
+    );
+  }
+
+  const selectedDayData = selectedDate ? calendarData.get(formatDate(selectedDate, "yyyy-MM-dd")) : null;
+
+  return (
+    <div className="min-h-screen" style={{ backgroundColor: COLORS.gray50 }}>
+      {/* Header */}
+      <div className="p-6 border-b shadow-sm" style={{ backgroundColor: COLORS.white }}>
+        <div className="max-w-7xl mx-auto">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h1 className="text-3xl font-extrabold flex items-center gap-3" style={{ color: COLORS.gray800 }}>
+                <div className="p-2 rounded-xl" style={{ backgroundColor: `${COLORS.primary}20` }}>
+                  <CalendarIcon className="w-8 h-8" style={{ color: COLORS.primary }} />
+                </div>
+                Calendar Management
+              </h1>
+              <p className="mt-2 text-sm font-medium" style={{ color: COLORS.gray600 }}>
+                View and manage your tank booking schedule
+              </p>
+            </div>
+          </div>
+
+          {/* Stats Cards */}
+          {stats && (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="p-5 rounded-xl border-2 shadow-sm hover:shadow-md transition-shadow" style={{ backgroundColor: COLORS.white, borderColor: COLORS.gray200 }}>
+                <div className="flex items-center gap-3">
+                  <div className="p-3 rounded-xl" style={{ backgroundColor: `${COLORS.primary}15` }}>
+                    <CalendarDays className="w-6 h-6" style={{ color: COLORS.primary }} />
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold" style={{ color: COLORS.gray600 }}>DAILY CAPACITY</p>
+                    <p className="text-3xl font-extrabold" style={{ color: COLORS.primary }}>{stats.totalDailySessions}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-5 rounded-xl border-2 shadow-sm hover:shadow-md transition-shadow" style={{ backgroundColor: COLORS.white, borderColor: COLORS.gray200 }}>
+                <div className="flex items-center gap-3">
+                  <div className="p-3 rounded-xl" style={{ backgroundColor: `${COLORS.success}15` }}>
+                    <TrendingUp className="w-6 h-6" style={{ color: COLORS.success }} />
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold" style={{ color: COLORS.gray600 }}>MONTHLY BOOKINGS</p>
+                    <p className="text-3xl font-extrabold" style={{ color: COLORS.success }}>{stats.monthlyBookings}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-5 rounded-xl border-2 shadow-sm hover:shadow-md transition-shadow" style={{ backgroundColor: COLORS.white, borderColor: COLORS.gray200 }}>
+                <div className="flex items-center gap-3">
+                  <div className="p-3 rounded-xl" style={{ backgroundColor: `${COLORS.warning}15` }}>
+                    <Users className="w-6 h-6" style={{ color: COLORS.warning }} />
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold" style={{ color: COLORS.gray600 }}>READY TANKS</p>
+                    <p className="text-3xl font-extrabold" style={{ color: COLORS.warning }}>{stats.readyTanks}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-5 rounded-xl border-2 shadow-sm hover:shadow-md transition-shadow" style={{ backgroundColor: COLORS.white, borderColor: COLORS.gray200 }}>
+                <div className="flex items-center gap-3">
+                  <div className="p-3 rounded-xl" style={{ backgroundColor: `${COLORS.error}15` }}>
+                    <Clock className="w-6 h-6" style={{ color: COLORS.error }} />
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold" style={{ color: COLORS.gray600 }}>HOURS</p>
+                    <p className="text-xl font-extrabold" style={{ color: COLORS.error }}>
+                      {settings?.openTime} - {settings?.closeTime}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="max-w-7xl mx-auto p-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+          {/* Calendar Section */}
+          <div className="lg:col-span-2 rounded-xl border p-4 shadow-md" style={{ backgroundColor: COLORS.white, borderColor: COLORS.gray200 }}>
+            {/* Calendar Header */}
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-2xl font-bold" style={{ color: COLORS.gray800 }}>
+                {formatDate(currentMonth, "MMMM yyyy")}
+              </h2>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => handleMonthChange(-1)}
+                  className="p-2 rounded-lg border transition-all hover:shadow"
+                  style={{ borderColor: COLORS.gray200, backgroundColor: COLORS.white }}
+                >
+                  <ChevronLeft className="w-4 h-4" style={{ color: COLORS.gray600 }} />
+                </button>
+                 <button
+                   onClick={() => {
+                     setCurrentMonth(new Date());
+                     setSelectedDate(null);
+                   }}
+                   className="px-3 py-2 rounded-lg border transition-all hover:shadow text-xs font-bold"
+                   style={{ borderColor: COLORS.primary, backgroundColor: `${COLORS.primary}10`, color: COLORS.primary }}
+                 >
+                   Today
+                 </button>
+                <button
+                  onClick={() => handleMonthChange(1)}
+                  className="p-2 rounded-lg border transition-all hover:shadow"
+                  style={{ borderColor: COLORS.gray200, backgroundColor: COLORS.white }}
+                >
+                  <ChevronRight className="w-4 h-4" style={{ color: COLORS.gray600 }} />
+                </button>
+              </div>
+            </div>
+
+            {/* Legend */}
+            <div className="flex flex-wrap items-center gap-3 mb-4 p-2 rounded-lg text-xs" style={{ backgroundColor: COLORS.gray50 }}>
+              <div className="flex items-center gap-1">
+                <div className="w-3 h-3 rounded" style={{ backgroundColor: `${COLORS.success}40` }} />
+                <span className="font-semibold" style={{ color: COLORS.gray700 }}>Available</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <div className="w-3 h-3 rounded" style={{ backgroundColor: `${COLORS.warning}40` }} />
+                <span className="font-semibold" style={{ color: COLORS.gray700 }}>Partial</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <div className="w-3 h-3 rounded" style={{ backgroundColor: `${COLORS.error}40` }} />
+                <span className="font-semibold" style={{ color: COLORS.gray700 }}>Sold Out</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <div className="w-3 h-3 rounded" style={{ backgroundColor: `${COLORS.error}80` }} />
+                <span className="font-semibold" style={{ color: COLORS.gray700 }}>Closed</span>
+              </div>
+            </div>
+
+            {/* Calendar Grid */}
+            <div className="grid grid-cols-7 gap-2">
+            {/* Day Headers */}
+            {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => (
+              <div key={day} className="text-center py-2 text-xs font-bold" style={{ color: COLORS.gray600 }}>
+                {day}
+              </div>
+            ))}
+
+            {/* Calendar Days */}
+            {calendarDays.map((day, idx) => {
+              if (!day) {
+                return <div key={`empty-${idx}`} className="aspect-square" />;
+              }
+
+              const dateKey = formatDate(day, "yyyy-MM-dd");
+              const dayData = calendarData.get(dateKey);
+              const isToday = isSameDay(day, today);
+              const isPast = day < today && !isSameDay(day, today);
+
+              let backgroundColor = COLORS.white;
+              let borderColor = COLORS.gray200;
+              let statusIcon = null;
+
+              if (dayData) {
+                const available = dayData.availableSessions || 0;
+                const total = dayData.totalSessions || 0;
+
+                if (dayData.status === "Closed") {
+                  backgroundColor = `${COLORS.error}90`;
+                  borderColor = COLORS.error;
+                  statusIcon = <Lock className="w-2 h-2" style={{ color: COLORS.white }} />;
+                } else if (dayData.status === "Sold Out" || (available === 0 && total > 0)) {
+                  backgroundColor = `${COLORS.error}20`;
+                  borderColor = COLORS.error;
+                  statusIcon = <XCircle className="w-2 h-2" style={{ color: COLORS.error }} />;
+                } else if (dayData.bookedSessions > 0) {
+                  const bookingPercentage = total > 0 ? (dayData.bookedSessions / total) * 100 : 0;
+                  if (bookingPercentage >= 70) {
+                    backgroundColor = `${COLORS.warning}25`;
+                    borderColor = COLORS.warning;
+                  } else {
+                    backgroundColor = `${COLORS.success}20`;
+                    borderColor = COLORS.success;
+                  }
+                } else {
+                  backgroundColor = `${COLORS.success}15`;
+                  borderColor = COLORS.success;
+                }
+              }
+
+              const isSelected = selectedDate && isSameDay(day, selectedDate);
+              if (isSelected) {
+                borderColor = COLORS.primary;
+              } else if (isToday) {
+                borderColor = COLORS.primary;
+              }
+
+              return (
+                <button
+                  key={idx}
+                  onClick={() => !isPast && handleDateClick(day)}
+                  disabled={isPast}
+                  className="aspect-square rounded-lg flex flex-col items-center justify-center transition-all hover:shadow-md disabled:opacity-40 disabled:cursor-not-allowed relative p-1"
+                  style={{
+                    backgroundColor,
+                    borderWidth: (isToday || isSelected) ? '2px' : '1px',
+                    borderColor,
+                  }}
+                >
+                  <div className="flex items-center justify-between w-full mb-0.5">
+                    <span className="text-sm font-bold" style={{ 
+                      color: dayData?.status === "Closed" ? COLORS.white : (isPast ? COLORS.gray400 : COLORS.gray800) 
+                    }}>
+                      {day.getDate()}
+                    </span>
+                    {statusIcon}
+                  </div>
+                  
+                  {dayData && !isPast && dayData.status !== "Closed" && (
+                    <div className="w-full text-center">
+                      <div className="text-xs font-bold" style={{ color: COLORS.primary }}>
+                        {dayData.availableSessions}/{dayData.totalSessions}
+                      </div>
+                    </div>
+                  )}
+
+                  {dayData && !isPast && dayData.status === "Closed" && (
+                    <div className="text-[10px] font-bold" style={{ color: COLORS.white }}>
+                      CLOSED
+                    </div>
+                  )}
+
+                  {isToday && !isSelected && (
+                    <div className="absolute bottom-0.5 w-1 h-1 rounded-full" style={{ backgroundColor: COLORS.primary }} />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Day Details Sidebar - Always Visible */}
+        <div className="lg:col-span-1 rounded-xl border p-4 shadow-md" style={{ backgroundColor: COLORS.white, borderColor: COLORS.gray200 }}>
+          {selectedDate && selectedDayData ? (
+            <>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-bold" style={{ color: COLORS.gray800 }}>Day Details</h3>
+                <button
+                  onClick={() => setSelectedDate(null)}
+                  className="p-1 rounded-lg hover:bg-gray-100 transition-colors"
+                >
+                  <X className="w-4 h-4" style={{ color: COLORS.gray600 }} />
+                </button>
+              </div>
+
+            {/* Date */}
+            <div className="mb-4 p-3 rounded-lg" style={{ backgroundColor: COLORS.gray50 }}>
+              <p className="text-xs font-bold mb-1" style={{ color: COLORS.gray600 }}>DATE</p>
+              <p className="text-sm font-bold" style={{ color: COLORS.gray800 }}>
+                {formatDate(selectedDate, "full")}
+              </p>
+            </div>
+
+            {/* Status */}
+            <div className="mb-4">
+              <p className="text-xs font-bold mb-2" style={{ color: COLORS.gray600 }}>STATUS</p>
+              <div className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg`} style={{
+                backgroundColor: selectedDayData.status === "Closed" ? `${COLORS.error}20` :
+                  selectedDayData.status === "Sold Out" ? `${COLORS.error}20` :
+                  `${COLORS.success}20`,
+                color: selectedDayData.status === "Closed" || selectedDayData.status === "Sold Out" ? COLORS.error : COLORS.success
+              }}>
+                {selectedDayData.status === "Closed" ? <Lock className="w-4 h-4" /> :
+                  selectedDayData.status === "Sold Out" ? <XCircle className="w-4 h-4" /> :
+                  <CheckCircle2 className="w-4 h-4" />}
+                <span className="text-sm font-bold">{selectedDayData.status}</span>
+              </div>
+            </div>
+
+            {/* Hours */}
+            {selectedDayData.status !== "Closed" && (
+              <div className="mb-4">
+                <p className="text-xs font-bold mb-2" style={{ color: COLORS.gray600 }}>OPERATING HOURS</p>
+                <div className="flex items-center justify-between p-3 rounded-lg" style={{ backgroundColor: COLORS.gray50 }}>
+                  <span className="text-sm font-bold" style={{ color: COLORS.gray800 }}>{selectedDayData.openTime}</span>
+                  <span style={{ color: COLORS.gray400 }}>→</span>
+                  <span className="text-sm font-bold" style={{ color: COLORS.gray800 }}>{selectedDayData.closeTime}</span>
+                </div>
+              </div>
+            )}
+
+            {/* Sessions */}
+            <div className="mb-4">
+              <p className="text-xs font-bold mb-2" style={{ color: COLORS.gray600 }}>SESSIONS</p>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between p-3 rounded-lg" style={{ backgroundColor: COLORS.gray50 }}>
+                  <span className="text-sm font-medium" style={{ color: COLORS.gray600 }}>Total</span>
+                  <span className="text-lg font-bold" style={{ color: COLORS.gray800 }}>{selectedDayData.totalSessions}</span>
+                </div>
+                <div className="flex items-center justify-between p-3 rounded-lg" style={{ backgroundColor: `${COLORS.primary}10` }}>
+                  <span className="text-sm font-medium" style={{ color: COLORS.primary }}>Booked</span>
+                  <span className="text-lg font-bold" style={{ color: COLORS.primary }}>{selectedDayData.bookedSessions}</span>
+                </div>
+                <div className="flex items-center justify-between p-3 rounded-lg" style={{ backgroundColor: `${COLORS.success}10` }}>
+                  <span className="text-sm font-medium" style={{ color: COLORS.success }}>Available</span>
+                  <span className="text-lg font-bold" style={{ color: COLORS.success }}>{selectedDayData.availableSessions}</span>
+                </div>
+              </div>
+            </div>
+
+              {/* Actions */}
+              <div className="mt-4">
+                <button
+                  onClick={() => setIsModalOpen(true)}
+                  className="w-full py-2 rounded-lg font-bold text-white transition-all shadow hover:shadow-md flex items-center justify-center gap-2"
+                  style={{ backgroundColor: COLORS.primary }}
+                >
+                  <Settings className="w-4 h-4" />
+                  Configure Day
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="text-center py-12">
+              <div className="p-4 rounded-full inline-block mb-4" style={{ backgroundColor: COLORS.gray100 }}>
+                <CalendarDays className="w-8 h-8" style={{ color: COLORS.gray400 }} />
+              </div>
+              <p className="text-sm font-semibold mb-2" style={{ color: COLORS.gray600 }}>
+                Select a Date
+              </p>
+              <p className="text-xs" style={{ color: COLORS.gray600 }}>
+                Click any date to view details and sessions
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+      </div>
+
+      {/* Session Details Section - Below Calendar */}
+      {selectedDate && selectedDayData && selectedDayData.status !== "Closed" && sessionDetails.length > 0 && (
+        <div className="max-w-7xl mx-auto px-6 pb-6">
+          <div className="rounded-xl border p-6 shadow-lg" style={{ backgroundColor: COLORS.white, borderColor: COLORS.gray200 }}>
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h3 className="text-xl font-bold" style={{ color: COLORS.gray800 }}>
+                  Session Schedule - {formatDate(selectedDate, "full")}
+                </h3>
+                <div className="flex items-center gap-4 mt-2">
+                  <div className="flex items-center gap-2">
+                    <Clock className="w-4 h-4" style={{ color: COLORS.primary }} />
+                    <p className="text-sm font-semibold" style={{ color: COLORS.gray600 }}>
+                      Open: {selectedDayData.openTime}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Clock className="w-4 h-4" style={{ color: COLORS.error }} />
+                    <p className="text-sm font-semibold" style={{ color: COLORS.gray600 }}>
+                      Close: {selectedDayData.closeTime}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Info Banner */}
+            <div className="mb-4 p-3 rounded-lg border" style={{ 
+              backgroundColor: `${COLORS.primary}05`,
+              borderColor: COLORS.primary 
+            }}>
+              <p className="text-xs font-semibold" style={{ color: COLORS.gray700 }}>
+                Showing sessions calculated for this specific day's operating hours ({selectedDayData.openTime} - {selectedDayData.closeTime})
+              </p>
+            </div>
+
+            <div className="space-y-4">
+              {sessionDetails.map((tankDetail) => (
+                  <div key={tankDetail.tankNumber} className="border rounded-lg p-4" style={{ borderColor: COLORS.gray200 }}>
+                    {/* Tank Header */}
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <div className="w-10 h-10 rounded-lg flex items-center justify-center text-white font-bold text-lg shadow" 
+                          style={{ backgroundColor: COLORS.primary }}>
+                          {tankDetail.tankNumber}
+                        </div>
+                        <div>
+                          <h4 className="font-bold text-base" style={{ color: COLORS.gray800 }}>{tankDetail.tankName}</h4>
+                          <p className="text-xs font-semibold" style={{ color: COLORS.gray600 }}>
+                            {tankDetail.sessions.length} sessions
+                          </p>
+                        </div>
+                      </div>
+                      <span className="px-3 py-1 rounded-lg text-xs font-bold" style={{ 
+                        backgroundColor: `${COLORS.success}20`,
+                        color: COLORS.success 
+                      }}>
+                        READY
+                      </span>
+                    </div>
+
+                    {/* Sessions Grid */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {tankDetail.sessions.map((session) => (
+                        <div key={session.sessionNumber} className="border rounded-lg p-3 hover:shadow-md transition-shadow" 
+                          style={{ borderColor: COLORS.gray200, backgroundColor: COLORS.gray50 }}>
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-xs font-bold px-2 py-1 rounded" style={{ 
+                              backgroundColor: COLORS.primaryLight,
+                              color: COLORS.primaryDark 
+                            }}>
+                              #{session.sessionNumber}
+                            </span>
+                            <span className="text-xs font-semibold" style={{ color: COLORS.gray600 }}>
+                              {settings?.sessionDuration}min
+                            </span>
+                          </div>
+
+                          <div className="space-y-2">
+                            {/* Session Time */}
+                            <div className="flex items-center gap-2">
+                              <Clock className="w-3 h-3 flex-shrink-0" style={{ color: COLORS.primary }} />
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-semibold truncate" style={{ color: COLORS.gray800 }}>
+                                  {session.startTime} - {session.endTime}
+                                </p>
+                              </div>
+                            </div>
+
+                            {/* Cleaning Time */}
+                            <div className="flex items-center gap-2">
+                              <div className="w-3 h-3 flex-shrink-0 flex items-center justify-center">
+                                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: COLORS.warning }} />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs truncate" style={{ color: COLORS.gray600 }}>
+                                  Clean: {session.cleaningStart} - {session.cleaningEnd}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Summary Footer */}
+            <div className="mt-4 p-4 rounded-lg border" style={{ 
+              backgroundColor: `${COLORS.primary}08`,
+              borderColor: COLORS.primary 
+            }}>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-bold" style={{ color: COLORS.gray600 }}>TOTAL CAPACITY</p>
+                  <p className="text-2xl font-bold mt-1" style={{ color: COLORS.primary }}>
+                    {stats?.totalDailySessions} Sessions
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm font-semibold" style={{ color: COLORS.gray600 }}>
+                    {sessionDetails.length} tanks × {sessionDetails[0]?.sessions.length || 0}
+                  </p>
+                  <p className="text-xs mt-1" style={{ color: COLORS.gray600 }}>
+                    Close: {stats?.actualCloseTime}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Day Configuration Modal */}
+      {settings && selectedDayData && (
+        <DayConfigModal
+          isOpen={isModalOpen}
+          onClose={() => {
+            setIsModalOpen(false);
+          }}
           dayData={selectedDayData}
-          onSave={fetchCalendarData}
+          settings={settings}
           readyTankCount={readyTankCount}
-          // Pass the dynamically calculated total cycle time
-          cycleDuration={totalCycleMinutes}
+          onSave={() => {
+            fetchData();
+            setIsModalOpen(false);
+          }}
         />
       )}
     </div>
-  )
-}
+  );
+};
 
-export default App
+export default CalendarManage;

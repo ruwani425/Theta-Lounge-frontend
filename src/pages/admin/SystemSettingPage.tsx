@@ -1,6 +1,6 @@
 "use client"
 import { useState, memo, useCallback, useEffect, useMemo } from "react"
-import { Save, RotateCcw, CheckCircle, AlertCircle, Loader2, Settings } from "lucide-react"
+import { Save, RotateCcw, CheckCircle, AlertCircle, Settings } from "lucide-react"
 import apiRequest from "../../core/axios" // Ensure this path is correct
 
 // --- THEME COLORS ---
@@ -23,13 +23,16 @@ const THETA_COLORS = {
 
 // --- INTERFACE DEFINITION ---
 interface SystemSettingsProps {
-  _id?: string; 
-  defaultFloatPrice: number | string 
-  cleaningBuffer: number | string
-  sessionDuration: number | string // Included in interface
-  sessionsPerDay: number | string  
-  openTime: string
-  closeTime: string
+  _id?: string; 
+  defaultFloatPrice: number | string 
+  cleaningBuffer: number | string
+  sessionDuration: number | string // Included in interface
+  sessionsPerDay: number | string  
+  openTime: string
+  closeTime: string
+  numberOfTanks: number | string // NEW: Number of floating tanks
+  tankStaggerInterval: number | string // NEW: Gap between tank start times (in minutes)
+  actualCloseTime?: string // NEW: Calculated actual closing time
 }
 
 type SettingField = keyof Omit<SystemSettingsProps, '_id'> 
@@ -122,55 +125,97 @@ InputField.displayName = "InputField"
 // --- UTILITY FUNCTION FOR CALCULATION ---
 
 /**
- * Calculates the maximum number of full sessions that can fit between open and close times.
- * This simulates the sequential booking process: [Session Duration] followed by [Cleaning Buffer].
- * The calculation is equivalent to: Floor((Total Operational Time) / (Duration + Buffer)).
- * * @param openTime 'HH:MM'
- * @param closeTime 'HH:MM'
+ * Calculates the maximum number of full sessions per tank with staggered start times.
+ * @param openTime 'HH:MM' - First tank start time
+ * @param closeTime 'HH:MM' - Shop closing time (last session must end before this)
  * @param duration Session duration in minutes
  * @param buffer Cleaning buffer in minutes
- * @returns Calculated sessions (integer, floored)
+ * @param numberOfTanks Number of tanks
+ * @param staggerInterval Gap between tank start times in minutes
+ * @returns Object with sessionsPerTank and actualCloseTime
  */
-const calculateSessionsPerDay = (openTime: string, closeTime: string, duration: number, buffer: number): number => {
-    // 1. Time string to minutes from midnight
+const calculateStaggeredSessions = (
+    openTime: string, 
+    closeTime: string, 
+    duration: number, 
+    buffer: number, 
+    numberOfTanks: number, 
+    staggerInterval: number
+): { sessionsPerTank: number; actualCloseTime: string } => {
+    // Helper: Time string to minutes from midnight
     const timeToMinutes = (time: string): number => {
         const [hours, minutes] = time.split(':').map(Number);
         if (isNaN(hours) || isNaN(minutes)) return 0;
         return hours * 60 + minutes;
     };
 
+    // Helper: Minutes to time string
+    const minutesToTime = (minutes: number): string => {
+        const hrs = Math.floor(minutes / 60) % 24;
+        const mins = minutes % 60;
+        return `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+    };
+
     const openMinutes = timeToMinutes(openTime);
     let closeMinutes = timeToMinutes(closeTime);
 
-    // If close time is earlier than open time, assume it wraps into the next day (e.g., 22:00 to 06:00)
+    // Handle next-day closing
     if (closeMinutes <= openMinutes) {
-        closeMinutes += 24 * 60; 
+        closeMinutes += 24 * 60;
     }
     
-    const totalOperatingMinutes = closeMinutes - openMinutes;
-    const sessionLength = duration + buffer; // Total time slot length
+    const sessionLength = duration + buffer;
 
-    // Check for invalid data (e.g., zero duration or buffer)
-    if (sessionLength <= 0 || totalOperatingMinutes <= 0 || isNaN(totalOperatingMinutes) || isNaN(sessionLength)) {
-        return 0;
+    // Validate inputs
+    if (sessionLength <= 0 || numberOfTanks <= 0 || staggerInterval < 0 || 
+        isNaN(openMinutes) || isNaN(closeMinutes)) {
+        return { sessionsPerTank: 0, actualCloseTime: closeTime };
     }
 
-    // Return only full, completed sessions
-    return Math.floor(totalOperatingMinutes / sessionLength);
+    let maxSessionsPerTank = 0;
+    let latestEndTime = openMinutes;
+
+    // Calculate sessions for each tank
+    for (let tankIndex = 0; tankIndex < numberOfTanks; tankIndex++) {
+        const tankStartMinutes = openMinutes + (tankIndex * staggerInterval);
+        
+        // Calculate how many sessions this tank can fit
+        const availableTime = closeMinutes - tankStartMinutes;
+        const tankSessions = Math.floor(availableTime / sessionLength);
+        
+        if (tankSessions > 0) {
+            // Calculate when this tank's last session ends (including cleaning)
+            const tankEndTime = tankStartMinutes + (tankSessions * sessionLength);
+            latestEndTime = Math.max(latestEndTime, tankEndTime);
+            
+            // Track maximum sessions (all tanks should have same capacity in this design)
+            maxSessionsPerTank = Math.max(maxSessionsPerTank, tankSessions);
+        }
+    }
+
+    const actualCloseTime = minutesToTime(latestEndTime);
+    
+    return { 
+        sessionsPerTank: maxSessionsPerTank, 
+        actualCloseTime 
+    };
 };
 
 
 // --- MAIN COMPONENT ---
 const SystemSettings = () => {
-  // 1. Define the default state for a brand new, unsaved document
-  const defaultState: SystemSettingsProps = {
-    defaultFloatPrice: 0,
-    cleaningBuffer: 15,
-    sessionDuration: 60, // NEW DEFAULT
-    sessionsPerDay: 0,
-    openTime: "09:00",
-    closeTime: "21:00",
-  };
+  // 1. Define the default state for a brand new, unsaved document
+  const defaultState: SystemSettingsProps = {
+    defaultFloatPrice: 0,
+    cleaningBuffer: 30,
+    sessionDuration: 60,
+    sessionsPerDay: 0,
+    openTime: "08:00",
+    closeTime: "22:00",
+    numberOfTanks: 2, // NEW DEFAULT
+    tankStaggerInterval: 30, // NEW DEFAULT (30 minutes gap)
+    actualCloseTime: "22:00",
+  };
 
   const [settings, setSettings] = useState<SystemSettingsProps>(defaultState)
   const [initialSettings, setInitialSettings] = useState<SystemSettingsProps>(defaultState) 
@@ -181,30 +226,42 @@ const SystemSettings = () => {
   const [isLoading, setIsLoading] = useState(false) 
   const [fetchError, setFetchError] = useState<string | null>(null)
 
-  // --- CALCULATED VALUE ---
-  const calculatedSessionCount = useMemo(() => {
+  // --- CALCULATED VALUE ---
+  const { calculatedSessionCount, calculatedCloseTime } = useMemo(() => {
     // Extract current values, ensuring they are treated as numbers (0 if blank/invalid string)
     const duration = Number(settings.sessionDuration) || 0;
     const buffer = Number(settings.cleaningBuffer) || 0;
+    const tanks = Number(settings.numberOfTanks) || 1;
+    const stagger = Number(settings.tankStaggerInterval) || 0;
     
     // Time strings are always strings
     const openTime = settings.openTime;
     const closeTime = settings.closeTime;
 
-    return calculateSessionsPerDay(openTime, closeTime, duration, buffer);
-  }, [settings.openTime, settings.closeTime, settings.sessionDuration, settings.cleaningBuffer]);
+    const result = calculateStaggeredSessions(openTime, closeTime, duration, buffer, tanks, stagger);
+    
+    return {
+      calculatedSessionCount: result.sessionsPerTank,
+      calculatedCloseTime: result.actualCloseTime
+    };
+  }, [settings.openTime, settings.closeTime, settings.sessionDuration, settings.cleaningBuffer, settings.numberOfTanks, settings.tankStaggerInterval]);
 
-  // --- EFFECT TO UPDATE CALCULATED FIELD IN STATE ---
-  useEffect(() => {
-    // Update the sessionsPerDay field in the state whenever the calculated count changes
-    setSettings(prev => {
-      if (prev.sessionsPerDay !== calculatedSessionCount) {
-        // Only update the value, do not touch hasChanges here
-        return { ...prev, sessionsPerDay: calculatedSessionCount };
-      }
-      return prev;
-    });
-  }, [calculatedSessionCount]);
+  // --- EFFECT TO UPDATE CALCULATED FIELDS IN STATE ---
+  useEffect(() => {
+    // Update the calculated fields in the state whenever they change
+    setSettings(prev => {
+      const needsUpdate = prev.sessionsPerDay !== calculatedSessionCount || prev.actualCloseTime !== calculatedCloseTime;
+      if (needsUpdate) {
+        // Only update the values, do not touch hasChanges here
+        return { 
+          ...prev, 
+          sessionsPerDay: calculatedSessionCount,
+          actualCloseTime: calculatedCloseTime 
+        };
+      }
+      return prev;
+    });
+  }, [calculatedSessionCount, calculatedCloseTime]);
 
 
   // --- DATA FETCHING (GET Request) ---
@@ -244,36 +301,38 @@ const SystemSettings = () => {
   }, [])
 
   // --- HANDLERS ---
-  const handleInputChange = useCallback((field: SettingField, value: number | string) => {
-    setSettings((prev) => {
-      // Create new settings object based on input change
-      const newSettings = { ...prev, [field]: value } as SystemSettingsProps;
+  const handleInputChange = useCallback((field: SettingField, value: number | string) => {
+    setSettings((prev) => {
+      // Create new settings object based on input change
+      const newSettings = { ...prev, [field]: value } as SystemSettingsProps;
       
       // Calculate changes based on editable fields only
-      const hasChanged = (Object.keys(defaultState) as Array<keyof SystemSettingsProps>)
-        .filter(key => key !== 'sessionsPerDay') // Exclude calculated field from direct change check
+      const hasChanged = (Object.keys(defaultState) as Array<keyof SystemSettingsProps>)
+        .filter(key => key !== 'sessionsPerDay' && key !== 'actualCloseTime') // Exclude calculated fields
         .some(key => newSettings[key] !== initialSettings[key]);
 
-      setHasChanges(hasChanged);
-      setSaveSuccess(false);
-      return newSettings;
-    });
-  }, [initialSettings])
+      setHasChanges(hasChanged);
+      setSaveSuccess(false);
+      return newSettings;
+    });
+  }, [initialSettings])
 
   const handleSave = async () => {
     if (!hasChanges || isSaving || isLoading) return; // Prevent saving if loading/saving/no changes
     
-    // Prepare data for the database, converting transient empty strings to 0
-    const finalSettings: SystemSettingsProps = { ...settings };
-    (Object.keys(finalSettings) as Array<keyof SystemSettingsProps>).forEach(key => {
-        // Convert numerical string fields (which might be "") to 0 or their number value
-        if (typeof finalSettings[key] === 'string' && (key === 'defaultFloatPrice' || key === 'cleaningBuffer' || key === 'sessionDuration')) {
-            // This ensures sessionDuration is converted to a number/0 before saving (POST/PUT)
-            finalSettings[key] = (finalSettings[key] === "" ? 0 : Number(finalSettings[key])) as number;
-        }
-    });
-    // Ensure sessionsPerDay is explicitly stored as the calculated number
-    finalSettings.sessionsPerDay = calculatedSessionCount; 
+    // Prepare data for the database, converting transient empty strings to 0
+    const finalSettings: SystemSettingsProps = { ...settings };
+    (Object.keys(finalSettings) as Array<keyof SystemSettingsProps>).forEach(key => {
+        // Convert numerical string fields (which might be "") to 0 or their number value
+        if (typeof finalSettings[key] === 'string' && 
+            (key === 'defaultFloatPrice' || key === 'cleaningBuffer' || key === 'sessionDuration' || 
+             key === 'numberOfTanks' || key === 'tankStaggerInterval')) {
+            finalSettings[key] = (finalSettings[key] === "" ? 0 : Number(finalSettings[key])) as number;
+        }
+    });
+    // Ensure calculated fields are explicitly stored
+    finalSettings.sessionsPerDay = calculatedSessionCount;
+    finalSettings.actualCloseTime = calculatedCloseTime; 
 
     try {
       setIsSaving(true);
@@ -398,8 +457,131 @@ const SystemSettings = () => {
           </div>
         )}
 
-        {/* Settings Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+        {/* Daily Capacity Summary Card */}
+        {Number(settings.numberOfTanks) > 0 && Number(settings.sessionDuration) > 0 && (
+          <div className="mb-8 rounded-lg p-6 border-2" style={{ 
+            backgroundColor: `${THETA_COLORS.primary}05`, 
+            borderColor: THETA_COLORS.primary 
+          }}>
+            <div className="text-center">
+              <p className="text-sm font-medium uppercase tracking-wide mb-2" style={{ color: THETA_COLORS.textLight }}>
+                Total Sessions Per Day
+              </p>
+              <p className="text-6xl font-bold mb-3" style={{ color: THETA_COLORS.primary }}>
+                {Number(settings.numberOfTanks) * calculatedSessionCount}
+              </p>
+              <div className="flex items-center justify-center gap-6 text-sm" style={{ color: THETA_COLORS.text }}>
+                <div>
+                  <span className="font-semibold">{calculatedSessionCount}</span> sessions per tank
+                </div>
+                <span style={{ color: THETA_COLORS.gray300 }}>×</span>
+                <div>
+                  <span className="font-semibold">{Number(settings.numberOfTanks || 0)}</span> tanks
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Tank Schedule Preview - Hour by Hour */}
+        {Number(settings.numberOfTanks) > 0 && Number(settings.sessionDuration) > 0 && calculatedSessionCount > 0 && (
+          <div className="mb-8 rounded-lg p-6 border" style={{ backgroundColor: THETA_COLORS.white, borderColor: THETA_COLORS.gray200 }}>
+            <h2 className="text-lg font-semibold mb-4" style={{ color: THETA_COLORS.primaryDark }}>
+              Daily Schedule - All Sessions
+            </h2>
+            <div className="space-y-6">
+              {Array.from({ length: Number(settings.numberOfTanks) || 0 }, (_, tankIndex) => {
+                const formatTime = (mins: number) => {
+                  const hrs = Math.floor(mins / 60) % 24;
+                  const min = mins % 60;
+                  return `${String(hrs).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+                };
+                
+                // Calculate initial tank start time
+                const [openHours, openMinutes] = settings.openTime.split(':').map(Number);
+                const tankStartMinutes = openHours * 60 + openMinutes + (tankIndex * Number(settings.tankStaggerInterval));
+                
+                const sessionDuration = Number(settings.sessionDuration);
+                const cleaningBuffer = Number(settings.cleaningBuffer);
+                const sessionLength = sessionDuration + cleaningBuffer;
+                
+                // Generate all sessions for this tank
+                const sessions = [];
+                for (let sessionNum = 0; sessionNum < calculatedSessionCount; sessionNum++) {
+                  const sessionStartMinutes = tankStartMinutes + (sessionNum * sessionLength);
+                  const sessionEndMinutes = sessionStartMinutes + sessionDuration;
+                  const cleaningEndMinutes = sessionEndMinutes + cleaningBuffer;
+                  
+                  sessions.push({
+                    number: sessionNum + 1,
+                    sessionStart: formatTime(sessionStartMinutes),
+                    sessionEnd: formatTime(sessionEndMinutes),
+                    cleaningEnd: formatTime(cleaningEndMinutes)
+                  });
+                }
+                
+                return (
+                  <div key={tankIndex} className="p-5 rounded-lg border" style={{ backgroundColor: THETA_COLORS.lightBg, borderColor: THETA_COLORS.gray200 }}>
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-white" style={{ backgroundColor: THETA_COLORS.primary }}>
+                          {tankIndex + 1}
+                        </div>
+                        <div>
+                          <span className="font-semibold text-lg" style={{ color: THETA_COLORS.primaryDark }}>
+                            Tank {tankIndex + 1}
+                          </span>
+                          <p className="text-xs" style={{ color: THETA_COLORS.textLight }}>
+                            Starts at {formatTime(tankStartMinutes)}
+                          </p>
+                        </div>
+                      </div>
+                      <span className="text-sm font-semibold px-3 py-1 rounded-full" style={{ 
+                        backgroundColor: THETA_COLORS.success, 
+                        color: THETA_COLORS.white 
+                      }}>
+                        {calculatedSessionCount} sessions
+                      </span>
+                    </div>
+                    
+                    {/* All Sessions for this tank */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {sessions.map((session) => (
+                        <div 
+                          key={session.number} 
+                          className="p-3 rounded-lg border" 
+                          style={{ backgroundColor: THETA_COLORS.white, borderColor: THETA_COLORS.gray200 }}
+                        >
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="text-xs font-bold px-2 py-0.5 rounded" style={{ 
+                              backgroundColor: THETA_COLORS.primaryLight, 
+                              color: THETA_COLORS.primaryDark 
+                            }}>
+                              Session {session.number}
+                            </span>
+                          </div>
+                          <div className="text-sm space-y-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold" style={{ color: THETA_COLORS.primary }}>
+                                {session.sessionStart} - {session.sessionEnd}
+                              </span>
+                            </div>
+                            <div className="text-xs" style={{ color: THETA_COLORS.textLight }}>
+                              Cleaning: {session.sessionEnd} - {session.cleaningEnd}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Settings Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
           {/* Pricing Section */}
           <div className="rounded-lg p-6 border" style={{ backgroundColor: THETA_COLORS.white, borderColor: THETA_COLORS.gray200 }}>
             <div className="flex items-center gap-3 mb-6">
@@ -417,74 +599,134 @@ const SystemSettings = () => {
             />
           </div>
 
-          {/* Capacity Section */}
-          <div className="rounded-lg p-6 border" style={{ backgroundColor: THETA_COLORS.white, borderColor: THETA_COLORS.gray200 }}>
-            <div className="flex items-center gap-3 mb-6">
-              <h2 className="text-lg font-semibold" style={{ color: THETA_COLORS.primaryDark }}>Capacity</h2>
-            </div>
-            {/* Session Duration (New Editable Field) */}
-            <InputField
-              label="Float Session Duration"
-              field="sessionDuration"
-              type="number"
-              value={settings.sessionDuration}
-              unit="min"
-              description="The duration of a single floating session"
-              onChange={handleInputChange}
-              disabled={isSaving}
-            />
-            {/* Max Sessions Per Day (Read-Only/Calculated Field) */}
-            <div className="mt-6">
-              <InputField
-                label="Max Sessions Per Day for one tank (Calculated)" // CHANGED TEXT HERE
-                field="sessionsPerDay"
-                type="number"
-                value={calculatedSessionCount} // Bind to the calculated count
-                description="Calculated based on operating hours, session duration, and buffer."
-                onChange={() => {}} // Dummy onChange since it's readOnly
-                disabled={isSaving}
-                readOnly={true} // Set as read-only
-              />
+          {/* Tank Configuration Section */}
+          <div className="rounded-lg p-6 border" style={{ backgroundColor: THETA_COLORS.white, borderColor: THETA_COLORS.gray200 }}>
+            <div className="flex items-center gap-3 mb-6">
+              <h2 className="text-lg font-semibold" style={{ color: THETA_COLORS.primaryDark }}>Tank Configuration</h2>
             </div>
-          </div>
+            {/* Number of Tanks */}
+            <InputField
+              label="Number of Floating Tanks"
+              field="numberOfTanks"
+              type="number"
+              value={settings.numberOfTanks}
+              description="Total number of floating tanks available"
+              onChange={handleInputChange}
+              disabled={isSaving}
+            />
+            {/* Tank Stagger Interval */}
+            <div className="mt-6">
+              <InputField
+                label="Tank Start Time Gap"
+                field="tankStaggerInterval"
+                type="number"
+                value={settings.tankStaggerInterval}
+                unit="min"
+                description="Time gap between each tank's first session (e.g., Tank 1: 8:00, Tank 2: 8:30)"
+                onChange={handleInputChange}
+                disabled={isSaving}
+              />
+            </div>
+          </div>
 
-          {/* Operating Hours Section */}
-          <div className="md:col-span-2 rounded-lg p-6 border" style={{ backgroundColor: THETA_COLORS.white, borderColor: THETA_COLORS.gray200 }}>
-            <div className="flex items-center gap-3 mb-6">
-              <h2 className="text-lg font-semibold" style={{ color: THETA_COLORS.primaryDark }}>Operating Hours</h2>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <InputField
-                label="Opening Time"
-                field="openTime"
-                type="time"
-                value={settings.openTime}
-                description="Start of first available session"
-                onChange={handleInputChange}
-                disabled={isSaving}
-              />
-              <InputField
-                label="Closing Time"
-                field="closeTime"
-                type="time"
-                value={settings.closeTime}
-                description="End of last scheduled session"
-                onChange={handleInputChange}
-                disabled={isSaving}
-              />
-              <InputField
-                label="Cleaning Buffer"
-                field="cleaningBuffer"
-                type="number"
-                value={settings.cleaningBuffer}
-                unit="min"
-                description="Time between sessions for cleaning"
-                onChange={handleInputChange}
-                disabled={isSaving}
-              />
-            </div>
-            
-          </div>
+          {/* Capacity Section */}
+          <div className="rounded-lg p-6 border" style={{ backgroundColor: THETA_COLORS.white, borderColor: THETA_COLORS.gray200 }}>
+            <div className="flex items-center gap-3 mb-6">
+              <h2 className="text-lg font-semibold" style={{ color: THETA_COLORS.primaryDark }}>Session Capacity</h2>
+            </div>
+            {/* Session Duration (Editable Field) */}
+            <InputField
+              label="Float Session Duration"
+              field="sessionDuration"
+              type="number"
+              value={settings.sessionDuration}
+              unit="min"
+              description="The duration of a single floating session"
+              onChange={handleInputChange}
+              disabled={isSaving}
+            />
+            {/* Max Sessions Per Day (Per Tank) */}
+            <div className="mt-6">
+              <InputField
+                label="Max Sessions Per Day (Per Tank)"
+                field="sessionsPerDay"
+                type="number"
+                value={calculatedSessionCount}
+                description="Calculated sessions per tank with staggered start times"
+                onChange={() => {}}
+                disabled={isSaving}
+                readOnly={true}
+              />
+            </div>
+            {/* Total Sessions Per Day (All Tanks) */}
+            <div className="mt-6">
+              <div className="p-4 rounded-lg" style={{ backgroundColor: `${THETA_COLORS.primary}10`, borderLeft: `4px solid ${THETA_COLORS.primary}` }}>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium" style={{ color: THETA_COLORS.textLight }}>
+                      Total Daily Capacity (All Tanks)
+                    </p>
+                    <p className="text-3xl font-bold mt-1" style={{ color: THETA_COLORS.primary }}>
+                      {calculatedSessionCount * Number(settings.numberOfTanks || 0)} Sessions
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm" style={{ color: THETA_COLORS.textLight }}>
+                      {calculatedSessionCount} sessions × {Number(settings.numberOfTanks || 0)} tanks
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Operating Hours Section */}
+          <div className="md:col-span-2 rounded-lg p-6 border" style={{ backgroundColor: THETA_COLORS.white, borderColor: THETA_COLORS.gray200 }}>
+            <div className="flex items-center gap-3 mb-6">
+              <h2 className="text-lg font-semibold" style={{ color: THETA_COLORS.primaryDark }}>Operating Hours</h2>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+              <InputField
+                label="Opening Time (First Tank)"
+                field="openTime"
+                type="time"
+                value={settings.openTime}
+                description="When the first tank starts"
+                onChange={handleInputChange}
+                disabled={isSaving}
+              />
+              <InputField
+                label="Target Closing Time"
+                field="closeTime"
+                type="time"
+                value={settings.closeTime}
+                description="Latest time for last session"
+                onChange={handleInputChange}
+                disabled={isSaving}
+              />
+              <InputField
+                label="Actual Closing Time"
+                field="actualCloseTime"
+                type="time"
+                value={calculatedCloseTime}
+                description="When all tanks complete (incl. cleaning)"
+                onChange={() => {}}
+                disabled={isSaving}
+                readOnly={true}
+              />
+              <InputField
+                label="Cleaning Buffer"
+                field="cleaningBuffer"
+                type="number"
+                value={settings.cleaningBuffer}
+                unit="min"
+                description="Time between sessions for cleaning"
+                onChange={handleInputChange}
+                disabled={isSaving}
+              />
+            </div>
+            
+          </div>
         </div>
 
         {/* Action Buttons */}
