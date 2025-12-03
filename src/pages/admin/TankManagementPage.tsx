@@ -29,7 +29,7 @@ const statusColors: Record<string, { bg: string; text: string; border: string }>
   Maintenance: { bg: "#F44336", text: "#FFFFFF", border: "#F44336" }, // Red for Maintenance
 }
 
-// --- STATUS TOGGLE COMPONENT ---
+// --- STATUS TOGGLE COMPONENT (Kept for logic, but commented out in table) ---
 
 interface StatusToggleProps {
   tank: Tank;
@@ -92,7 +92,7 @@ const TankManagementPage: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true)
   const [updating, setUpdating] = useState<string | null>(null); // Stores the ID of the tank currently being updated
 
-  // --- API & State Handlers ---
+  // --- API & State Handlers (Kept for potential future use) ---
 
   // 1. Handle Status Update (Optimistic UI + API Call)
   const handleStatusUpdate = useCallback(async (id: string, newStatus: "Ready" | "Maintenance") => {
@@ -134,7 +134,7 @@ const TankManagementPage: React.FC = () => {
   }, [tanks]);
   
 
-  // 2. Handle Delete
+  // 2. Handle Delete (Kept for potential future use)
   const handleDelete = async (id: string, name: string) => {
     const result = await Swal.fire({
       title: 'Are you sure?',
@@ -265,10 +265,11 @@ const TankManagementPage: React.FC = () => {
                     <th className="px-6 py-3 text-left text-xs font-bold uppercase tracking-wider text-cyan-800 w-[10rem]">
                       Tank Name
                     </th>
-                    {/* Status: fixed width */}
-                    <th className="px-6 py-3 text-left text-xs font-bold uppercase tracking-wider text-cyan-800 w-[10rem]">
+                    {/* Status: fixed width - COMMENTED OUT */}
+                    {/* <th className="px-6 py-3 text-left text-xs font-bold uppercase tracking-wider text-cyan-800 w-[10rem]">
                       Status
                     </th>
+                    */}
                     {/* Capacity: fixed width */}
                     <th className="px-6 py-3 text-left text-xs font-bold uppercase tracking-wider text-cyan-800 hidden sm:table-cell w-[8rem]">
                       Capacity
@@ -305,14 +306,15 @@ const TankManagementPage: React.FC = () => {
                           {tank.name}
                         </td>
                         
-                        {/* Status (Toggle Button) */}
-                        <td className="px-6 py-4 whitespace-nowrap align-top">
+                        {/* Status (Toggle Button) - COMMENTED OUT */}
+                        {/* <td className="px-6 py-4 whitespace-nowrap align-top">
                             <StatusToggle 
                                 tank={tank}
                                 onUpdate={handleStatusUpdate}
                                 disabled={updating === tank._id}
                             />
                         </td>
+                        */}
                         
                         {/* Capacity */}
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600 hidden sm:table-cell align-top">
@@ -344,6 +346,8 @@ const TankManagementPage: React.FC = () => {
                             >
                               <Edit className="w-5 h-5" />
                             </button>
+                            {/* Delete Button - COMMENTED OUT */}
+                            {/*
                             <button
                               onClick={() => handleDelete(tank._id, tank.name)}
                               title="Delete Tank"
@@ -351,6 +355,7 @@ const TankManagementPage: React.FC = () => {
                             >
                               <Trash2 className="w-5 h-5" />
                             </button>
+                            */}
                           </div>
                         </td>
                       </tr>
