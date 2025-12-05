@@ -1,6 +1,6 @@
 "use client"
 import React, { useState, useEffect, useCallback } from "react"
-import { Plus, X, Edit, Shield, Clock } from "lucide-react"
+import { Plus, X, Edit, Shield, Clock, ChevronLeft, ChevronRight } from "lucide-react" // Added Chevron icons
 import Swal from "sweetalert2"
 import apiRequest from '../../core/axios'; 
 
@@ -27,10 +27,24 @@ interface PackageConfig {
 
 // 🛑 NEW INTERFACE: Allows numerical fields to be null for empty form inputs
 interface PackageFormState extends Omit<PackageConfig, 'sessions' | 'pricePerSlot' | 'totalPrice' | 'discount'> {
-    sessions: number | null;
-    pricePerSlot: number | null;
-    totalPrice: number | null;
-    discount: number | null;
+    sessions: number | null;
+    pricePerSlot: number | null;
+    totalPrice: number | null;
+    discount: number | null;
+}
+
+interface PaginationResponse {
+    page: number
+    limit: number
+    total: number
+    totalPages: number
+    hasNextPage: boolean
+    hasPrevPage: boolean
+}
+
+interface PaginatedResponse {
+    data: PackageConfig[]
+    pagination: PaginationResponse
 }
 
 
@@ -45,10 +59,11 @@ const GENESIS_CONFIG = {
 
 // --- API Service Layer ---
 const packageApiService = {
-    fetchPackages: async (): Promise<PackageConfig[]> => {
-        // Fetching ALL packages (including inactive) to allow Admin to re-activate
-        const response: { data: PackageConfig[] } = await apiRequest.get('/packages/all'); 
-        return response.data;
+    // 🛑 UPDATED: Accept page/limit and expect the PaginatedResponse format
+    fetchPackages: async (page: number, limit: number): Promise<PaginatedResponse> => {
+        // Fetching ALL packages (including inactive) with pagination
+        const response: PaginatedResponse = await apiRequest.get(`/packages/all?page=${page}&limit=${limit}`); 
+        return response; 
     },
     createPackage: async (pkg: Partial<PackageConfig>): Promise<{ data: PackageConfig }> => {
         const response = await apiRequest.post('/packages', pkg);
@@ -144,45 +159,74 @@ const PackageManagementPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null);
 
+    // 🛑 NEW STATE: Pagination variables
+    const ITEMS_PER_PAGE = 10; // New standard limit for Admin Pagination
+    const [currentPage, setCurrentPage] = useState(1);
+    const [totalPages, setTotalPages] = useState(0);
+
   // --- Data Fetching ---
+  // 🛑 UPDATED: Now uses currentPage and ITEMS_PER_PAGE
   const fetchPackages = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     try {
-        // Fetch ALL packages
-        const data = await packageApiService.fetchPackages();
-        setPackages(data);
+        // Fetch ALL packages with pagination applied
+        const response = await packageApiService.fetchPackages(currentPage, ITEMS_PER_PAGE);
+        setPackages(response.data);
+        setTotalPages(response.pagination.totalPages);
     } catch (err: any) {
         console.error("Failed to fetch packages:", err);
         setError(err.message || "Failed to load packages from the server.");
     } finally {
         setIsLoading(false);
     }
-  }, []);
+  }, [currentPage]); // Depends on currentPage
 
   useEffect(() => {
       fetchPackages();
   }, [fetchPackages]);
+
+    // 🛑 NEW HANDLER: For reloading current page data after CRUD/Toggle
+    const handleReload = () => {
+        // When updating, we stay on the current page and refresh data
+        fetchPackages();
+    };
+
+    // 🛑 NEW HANDLERS: Pagination
+    const handleSetPage = (page: number) => {
+        setCurrentPage(page);
+    };
+    
+    const handlePreviousPage = () => {
+        setCurrentPage((prev) => Math.max(1, prev - 1));
+    };
+
+    const handleNextPage = () => {
+        setCurrentPage((prev) => Math.min(totalPages, prev + 1));
+    };
+
 
   // --- Handlers ---
   const handleCreateOrUpdate = async (pkg: PackageConfig) => {
     setIsLoading(true);
     try {
       if (pkg._id) {
-        // UPDATE: Send all updatable fields, backend recalculates derived fields
+        // UPDATE
         const { _id, ...updates } = pkg;
-        const response = await packageApiService.updatePackage(_id, updates);
-        Swal.fire('Updated!', `Package ${response.data.name} updated successfully.`, 'success');
+        await packageApiService.updatePackage(_id, updates);
+        Swal.fire('Updated!', `Package ${pkg.name} updated successfully.`, 'success');
       } else {
         // CREATE
         const { name, duration, sessions, pricePerSlot, discount, isActive } = pkg;
-        const response = await packageApiService.createPackage({ name, duration, sessions, pricePerSlot, discount, isActive });
-        Swal.fire('Created!', `Package ${response.data.name} created successfully.`, 'success');
+        await packageApiService.createPackage({ name, duration, sessions, pricePerSlot, discount, isActive });
+        Swal.fire('Created!', `Package ${pkg.name} created successfully.`, 'success');
+        // If creating a new package, reset to page 1 to see it quickly
+        setCurrentPage(1);
       }
       
       setIsModalOpen(false);
       setEditingPackage(null);
-      fetchPackages(); // Reload data after successful operation
+      handleReload(); // Reload data on current page or page 1 if created
 
     } catch (error: any) {
         const errorMessage = error?.message || 'Failed to save package details.';
@@ -206,7 +250,7 @@ const PackageManagementPage: React.FC = () => {
             Membership & Package Management
           </h1>
           <button
-            onClick={() => handleOpenModal(null)} // Call with null, modal handles default state
+            onClick={() => handleOpenModal(null)} 
             className="flex items-center gap-2 px-4 py-2 font-medium rounded-lg shadow-md transition-all hover:opacity-90"
             style={{ backgroundColor: COLOR_TEXT_DARK, color: COLOR_CARD_BG }}
             disabled={isLoading}
@@ -264,7 +308,7 @@ const PackageManagementPage: React.FC = () => {
 
         {/* Packages Table View */}
         {!isLoading && packages.length > 0 && (
-          <div className="rounded-xl border shadow-lg overflow-hidden" style={{ backgroundColor: COLOR_CARD_BG, borderColor: COLOR_MUTED + '30' }}>
+          <div className="rounded-xl border shadow-lg overflow-hidden mb-8" style={{ backgroundColor: COLOR_CARD_BG, borderColor: COLOR_MUTED + '30' }}>
             <table className="min-w-full text-sm">
               <thead>
                 <tr style={{ backgroundColor: COLOR_BG_LIGHT, borderBottom: `1px solid ${COLOR_MUTED}30` }}>
@@ -274,7 +318,6 @@ const PackageManagementPage: React.FC = () => {
                   <th className="px-6 py-4 text-left font-semibold" style={{ color: COLOR_TEXT_DARK }}>Price Per Slot (LKR)</th>
                   <th className="px-6 py-4 text-left font-semibold" style={{ color: COLOR_TEXT_DARK }}>Total Price (LKR)</th>
                   <th className="px-6 py-4 text-left font-semibold" style={{ color: COLOR_TEXT_DARK }}>Discount</th>
-                  {/* Renamed Genesis to Status */}
                   <th className="px-6 py-4 text-left font-semibold" style={{ color: COLOR_TEXT_DARK }}>Status</th>
                   <th className="px-6 py-4 text-right font-semibold" style={{ color: COLOR_TEXT_DARK }}>Actions</th>
                 </tr>
@@ -303,7 +346,7 @@ const PackageManagementPage: React.FC = () => {
                         <ActiveToggle 
                             pkgId={pkg._id}
                             initialState={pkg.isActive}
-                            onToggleSuccess={fetchPackages}
+                            onToggleSuccess={handleReload} // 🛑 Using handleReload
                         />
                       ) : (
                         <span className="text-xs" style={{ color: COLOR_MUTED }}>N/A</span>
@@ -320,9 +363,52 @@ const PackageManagementPage: React.FC = () => {
                 ))}
               </tbody>
             </table>
+                
+            {/* 🛑 NEW: Pagination Controls for Admin View */}
+            {totalPages > 1 && (
+                <div className="p-4 flex items-center justify-center gap-4 border-t" style={{ borderColor: COLOR_MUTED + '30' }}>
+                    <button
+                        onClick={handlePreviousPage}
+                        disabled={currentPage === 1}
+                        className="flex items-center gap-1 px-3 py-2 rounded-lg font-semibold text-sm transition-all disabled:opacity-50"
+                        style={{ backgroundColor: COLOR_ACCENT, color: COLOR_TEXT_DARK }}
+                    >
+                        <ChevronLeft className="w-4 h-4" /> Previous
+                    </button>
+
+                    <div className="flex items-center gap-2">
+                        {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+                            <button
+                                key={page}
+                                onClick={() => handleSetPage(page)}
+                                className={`w-8 h-8 rounded-lg font-semibold text-sm transition-all ${
+                                    currentPage === page
+                                        ? "text-white shadow-md"
+                                        : "text-gray-700 bg-white border border-gray-300 hover:border-gray-400"
+                                }`}
+                                style={{
+                                    backgroundColor: currentPage === page ? COLOR_TEXT_DARK : undefined,
+                                    color: currentPage === page ? COLOR_CARD_BG : undefined,
+                                }}
+                            >
+                                {page}
+                            </button>
+                        ))}
+                    </div>
+
+                    <button
+                        onClick={handleNextPage}
+                        disabled={currentPage === totalPages}
+                        className="flex items-center gap-1 px-3 py-2 rounded-lg font-semibold text-sm transition-all disabled:opacity-50"
+                        style={{ backgroundColor: COLOR_ACCENT, color: COLOR_TEXT_DARK }}
+                    >
+                        Next <ChevronRight className="w-4 h-4" />
+                    </button>
+                </div>
+            )}
           </div>
         )}
-        
+        
         {/* Empty State */}
         {!isLoading && !error && packages.length === 0 && (
             <div className="p-10 text-center rounded-xl border" style={{ color: COLOR_MUTED, backgroundColor: COLOR_CARD_BG, borderColor: COLOR_MUTED + '30' }}>
@@ -357,35 +443,35 @@ interface PackageModalProps {
 
 
 const PackageModal: React.FC<PackageModalProps> = ({ pkg, onClose, onSave, isLoading }) => {
-    
-    // 🛑 UPDATED: Use PackageFormState to allow null for number fields when creating a new package
+    
+    // 🛑 Use PackageFormState to allow null for number fields when creating a new package
   const [formData, setFormData] = useState<PackageFormState>(
     pkg 
-        ? { ...pkg, 
-            sessions: pkg.sessions, 
-            pricePerSlot: pkg.pricePerSlot,
-            totalPrice: pkg.totalPrice,
-            discount: pkg.discount,
-        }
-        : {
-            name: '',
-            duration: '1-Month',
-            sessions: null,       // Set to null for empty input field
-            pricePerSlot: null,   // Set to null for empty input field
-            totalPrice: null,     // Set to null (calculated read-only field)
-            discount: null,       // Set to null for empty input field
-            isGenesisEligible: false,
-            isActive: true, 
-        } as PackageFormState
+        ? { ...pkg, 
+            sessions: pkg.sessions, 
+            pricePerSlot: pkg.pricePerSlot,
+            totalPrice: pkg.totalPrice,
+            discount: pkg.discount,
+        }
+        : {
+            name: '',
+            duration: '1-Month',
+            sessions: null,       // Set to null for empty input field
+            pricePerSlot: null,   // Set to null for empty input field
+            totalPrice: null,     // Set to null (calculated read-only field)
+            discount: null,       // Set to null for empty input field
+            isGenesisEligible: false,
+            isActive: true, 
+        } as PackageFormState
   )
 
   const isEditing = !!pkg
   
-    // Safely retrieve numeric values for calculation, defaulting to 0 if null
-    const safeSessions = formData.sessions ?? 0;
-    const safePricePerSlot = formData.pricePerSlot ?? 0;
-    const safeDiscount = formData.discount ?? 0;
-    const safeTotalPrice = formData.totalPrice ?? 0;
+    // Safely retrieve numeric values for calculation, defaulting to 0 if null
+    const safeSessions = formData.sessions ?? 0;
+    const safePricePerSlot = formData.pricePerSlot ?? 0;
+    const safeDiscount = formData.discount ?? 0;
+    const safeTotalPrice = formData.totalPrice ?? 0;
 
   const finalPricePerFloat = safeTotalPrice > 0 && safeSessions > 0
     ? (safeTotalPrice / safeSessions).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")
@@ -400,7 +486,7 @@ const PackageModal: React.FC<PackageModalProps> = ({ pkg, onClose, onSave, isLoa
     
     const isEligible = safeSessions >= GENESIS_CONFIG.minSessions;
 
-    // Update form state with calculated values
+    // Update form state with calculated values
     setFormData(prev => ({
         ...prev,
         totalPrice: Math.round(calculatedTotal), // Store as number
@@ -412,46 +498,46 @@ const PackageModal: React.FC<PackageModalProps> = ({ pkg, onClose, onSave, isLoa
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value, type } = e.target
     let newValue: string | number | null = value
-    
-    // 🛑 UPDATED LOGIC: Handle number inputs to allow empty string (set to null)
+    
+    // 🛑 Handle number inputs to allow empty string (set to null)
     if (type === 'number') {
-        if (value === '') {
-            newValue = null; // Store null when input is empty
-        } else {
-            // Store the parsed integer value
-            newValue = parseInt(value);
-            if (isNaN(newValue)) {
-                newValue = null; // Fallback just in case
-            }
-        }
+        if (value === '') {
+            newValue = null; // Store null when input is empty
+        } else {
+            // Store the parsed integer value
+            newValue = parseInt(value);
+            if (isNaN(newValue)) {
+                newValue = null; // Fallback just in case
+            }
+        }
     }
     
-    // Assign the new value to the correct field
-    setFormData(prev => ({ ...prev, [name]: newValue } as PackageFormState));
+    // Assign the new value to the correct field
+    setFormData(prev => ({ ...prev, [name]: newValue } as PackageFormState));
   }
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     
-    // Use safe defaults (0) for validation and API submission
-    const sessions = formData.sessions ?? 0;
-    const pricePerSlot = formData.pricePerSlot ?? 0;
-    const totalPrice = formData.totalPrice ?? 0;
+    // Use safe defaults (0) for validation and API submission
+    const sessions = formData.sessions ?? 0;
+    const pricePerSlot = formData.pricePerSlot ?? 0;
+    const totalPrice = formData.totalPrice ?? 0;
 
-    // Validation: Check for essential inputs
+    // Validation: Check for essential inputs
     if (!formData.name || sessions <= 0 || pricePerSlot <= 0 || totalPrice <= 0) {
       Swal.fire('Error', 'Please ensure Package Name, Sessions, and Price Per Slot are all entered and greater than zero.', 'error')
       return
     }
     
-    // Convert to final PackageConfig structure for API submission
-    const finalPackageData: PackageConfig = {
-        ...formData,
-        sessions: sessions,
-        pricePerSlot: pricePerSlot,
-        totalPrice: totalPrice,
-        discount: formData.discount ?? 0,
-    } as PackageConfig;
+    // Convert to final PackageConfig structure for API submission
+    const finalPackageData: PackageConfig = {
+        ...formData,
+        sessions: sessions,
+        pricePerSlot: pricePerSlot,
+        totalPrice: totalPrice,
+        discount: formData.discount ?? 0,
+    } as PackageConfig;
 
     onSave(finalPackageData)
   }
@@ -487,12 +573,12 @@ const PackageModal: React.FC<PackageModalProps> = ({ pkg, onClose, onSave, isLoa
                 <option value="12-Month">12-Month</option>
               </select>
             </div>
-          </div>
+            </div>
 
           <div className="grid grid-cols-3 gap-4">
             <div>
               <label className="block text-xs font-semibold mb-1" style={{ color: COLOR_MUTED }}>Total Sessions</label>
-              {/* 🛑 Use nullish coalescing to display empty string for null */}
+              {/* 🛑 Use nullish coalescing to display empty string for null */}
               <input type="number" name="sessions" value={formData.sessions ?? ''} onChange={handleChange} min="1"
                 className="w-full border rounded-lg px-3 py-2" 
                 style={{ borderColor: COLOR_MUTED + '40', color: COLOR_TEXT_DARK }}
@@ -501,7 +587,7 @@ const PackageModal: React.FC<PackageModalProps> = ({ pkg, onClose, onSave, isLoa
             {/* Price Per Slot Input (Editable) */}
              <div>
               <label className="block text-xs font-semibold mb-1" style={{ color: COLOR_MUTED }}>Price Per Slot (LKR)</label>
-              {/* 🛑 Use nullish coalescing to display empty string for null */}
+              {/* 🛑 Use nullish coalescing to display empty string for null */}
               <input type="number" name="pricePerSlot" value={formData.pricePerSlot ?? ''} onChange={handleChange} min="0"
                 className="w-full border rounded-lg px-3 py-2" 
                 style={{ borderColor: COLOR_MUTED + '40', color: COLOR_TEXT_DARK }}
@@ -509,7 +595,7 @@ const PackageModal: React.FC<PackageModalProps> = ({ pkg, onClose, onSave, isLoa
             </div>
             <div>
               <label className="block text-xs font-semibold mb-1" style={{ color: COLOR_MUTED }}>Discount (%)</label>
-              {/* 🛑 Use nullish coalescing to display empty string for null */}
+              {/* 🛑 Use nullish coalescing to display empty string for null */}
               <input type="number" name="discount" value={formData.discount ?? ''} onChange={handleChange} min="0" max="100"
                 className="w-full border rounded-lg px-3 py-2" 
                 style={{ borderColor: COLOR_MUTED + '40', color: COLOR_TEXT_DARK }}
