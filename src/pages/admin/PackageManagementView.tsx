@@ -1,6 +1,6 @@
 "use client"
 import React, { useState, useEffect, useCallback } from "react"
-import { Plus, X, Edit, Shield, Clock, ChevronLeft, ChevronRight } from "lucide-react" // Added Chevron icons
+import { Plus, X, Edit, Shield, Clock, ChevronLeft, ChevronRight } from "lucide-react" 
 import Swal from "sweetalert2"
 import apiRequest from '../../core/axios'; 
 
@@ -34,17 +34,17 @@ interface PackageFormState extends Omit<PackageConfig, 'sessions' | 'pricePerSlo
 }
 
 interface PaginationResponse {
-    page: number
-    limit: number
-    total: number
-    totalPages: number
-    hasNextPage: boolean
-    hasPrevPage: boolean
+    page: number
+    limit: number
+    total: number
+    totalPages: number
+    hasNextPage: boolean
+    hasPrevPage: boolean
 }
 
 interface PaginatedResponse {
-    data: PackageConfig[]
-    pagination: PaginationResponse
+    data: PackageConfig[]
+    pagination: PaginationResponse
 }
 
 
@@ -159,10 +159,10 @@ const PackageManagementPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null);
 
-    // 🛑 NEW STATE: Pagination variables
-    const ITEMS_PER_PAGE = 10; // New standard limit for Admin Pagination
-    const [currentPage, setCurrentPage] = useState(1);
-    const [totalPages, setTotalPages] = useState(0);
+    // 🛑 NEW STATE: Pagination variables
+    const ITEMS_PER_PAGE = 10; // New standard limit for Admin Pagination
+    const [currentPage, setCurrentPage] = useState(1);
+    const [totalPages, setTotalPages] = useState(0);
 
   // --- Data Fetching ---
   // 🛑 UPDATED: Now uses currentPage and ITEMS_PER_PAGE
@@ -173,7 +173,7 @@ const PackageManagementPage: React.FC = () => {
         // Fetch ALL packages with pagination applied
         const response = await packageApiService.fetchPackages(currentPage, ITEMS_PER_PAGE);
         setPackages(response.data);
-        setTotalPages(response.pagination.totalPages);
+        setTotalPages(response.pagination.totalPages);
     } catch (err: any) {
         console.error("Failed to fetch packages:", err);
         setError(err.message || "Failed to load packages from the server.");
@@ -186,24 +186,24 @@ const PackageManagementPage: React.FC = () => {
       fetchPackages();
   }, [fetchPackages]);
 
-    // 🛑 NEW HANDLER: For reloading current page data after CRUD/Toggle
-    const handleReload = () => {
-        // When updating, we stay on the current page and refresh data
-        fetchPackages();
-    };
+    // 🛑 NEW HANDLER: For reloading current page data after CRUD/Toggle
+    const handleReload = () => {
+        // When updating, we stay on the current page and refresh data
+        fetchPackages();
+    };
 
-    // 🛑 NEW HANDLERS: Pagination
-    const handleSetPage = (page: number) => {
-        setCurrentPage(page);
-    };
-    
-    const handlePreviousPage = () => {
-        setCurrentPage((prev) => Math.max(1, prev - 1));
-    };
+    // 🛑 NEW HANDLERS: Pagination
+    const handleSetPage = (page: number) => {
+        setCurrentPage(page);
+    };
+    
+    const handlePreviousPage = () => {
+        setCurrentPage((prev) => Math.max(1, prev - 1));
+    };
 
-    const handleNextPage = () => {
-        setCurrentPage((prev) => Math.min(totalPages, prev + 1));
-    };
+    const handleNextPage = () => {
+        setCurrentPage((prev) => Math.min(totalPages, prev + 1));
+    };
 
 
   // --- Handlers ---
@@ -220,8 +220,8 @@ const PackageManagementPage: React.FC = () => {
         const { name, duration, sessions, pricePerSlot, discount, isActive } = pkg;
         await packageApiService.createPackage({ name, duration, sessions, pricePerSlot, discount, isActive });
         Swal.fire('Created!', `Package ${pkg.name} created successfully.`, 'success');
-        // If creating a new package, reset to page 1 to see it quickly
-        setCurrentPage(1);
+        // If creating a new package, reset to page 1 to see it quickly
+        setCurrentPage(1);
       }
       
       setIsModalOpen(false);
@@ -260,8 +260,9 @@ const PackageManagementPage: React.FC = () => {
           </button>
         </div>
 
-        {/* Genesis Collective Dashboard (Unchanged) */}
-        <div className="mb-8 p-6 rounded-xl shadow-lg border" style={{ backgroundColor: COLOR_CARD_BG, borderColor: COLOR_ACCENT + '60' }}>
+        {/* Genesis Collective Dashboard (Temporarily removing it to focus on form) */}
+        {/* 🛑 Temporarily Removed Genesis Collective Dashboard */}
+        {/*         <div className="mb-8 p-6 rounded-xl shadow-lg border" style={{ backgroundColor: COLOR_CARD_BG, borderColor: COLOR_ACCENT + '60' }}>
           <div className="flex justify-between items-center mb-4 border-b pb-3" style={{ borderColor: COLOR_MUTED + '30' }}>
              <h2 className="text-xl font-bold" style={{ color: COLOR_TEXT_DARK }}>
                 <Shield className="inline w-5 h-5 mr-2" style={{ color: COLOR_TEXT_DARK }} />
@@ -294,7 +295,8 @@ const PackageManagementPage: React.FC = () => {
               <p className="text-sm" style={{ color: COLOR_MUTED }}>Lifetime Discount</p>
             </div>
           </div>
-        </div>
+        </div> 
+        */}
 
         {/* Loading / Error States (Unchanged) */}
         {isLoading && packages.length === 0 && (
@@ -363,52 +365,52 @@ const PackageManagementPage: React.FC = () => {
                 ))}
               </tbody>
             </table>
-                
-            {/* 🛑 NEW: Pagination Controls for Admin View */}
-            {totalPages > 1 && (
-                <div className="p-4 flex items-center justify-center gap-4 border-t" style={{ borderColor: COLOR_MUTED + '30' }}>
-                    <button
-                        onClick={handlePreviousPage}
-                        disabled={currentPage === 1}
-                        className="flex items-center gap-1 px-3 py-2 rounded-lg font-semibold text-sm transition-all disabled:opacity-50"
-                        style={{ backgroundColor: COLOR_ACCENT, color: COLOR_TEXT_DARK }}
-                    >
-                        <ChevronLeft className="w-4 h-4" /> Previous
-                    </button>
+                
+            {/* 🛑 NEW: Pagination Controls for Admin View */}
+            {totalPages > 1 && (
+                <div className="p-4 flex items-center justify-center gap-4 border-t" style={{ borderColor: COLOR_MUTED + '30' }}>
+                    <button
+                        onClick={handlePreviousPage}
+                        disabled={currentPage === 1}
+                        className="flex items-center gap-1 px-3 py-2 rounded-lg font-semibold text-sm transition-all disabled:opacity-50"
+                        style={{ backgroundColor: COLOR_ACCENT, color: COLOR_TEXT_DARK }}
+                    >
+                        <ChevronLeft className="w-4 h-4" /> Previous
+                    </button>
 
-                    <div className="flex items-center gap-2">
-                        {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
-                            <button
-                                key={page}
-                                onClick={() => handleSetPage(page)}
-                                className={`w-8 h-8 rounded-lg font-semibold text-sm transition-all ${
-                                    currentPage === page
-                                        ? "text-white shadow-md"
-                                        : "text-gray-700 bg-white border border-gray-300 hover:border-gray-400"
-                                }`}
-                                style={{
-                                    backgroundColor: currentPage === page ? COLOR_TEXT_DARK : undefined,
-                                    color: currentPage === page ? COLOR_CARD_BG : undefined,
-                                }}
-                            >
-                                {page}
-                            </button>
-                        ))}
-                    </div>
+                    <div className="flex items-center gap-2">
+                        {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+                            <button
+                                key={page}
+                                onClick={() => handleSetPage(page)}
+                                className={`w-8 h-8 rounded-lg font-semibold text-sm transition-all ${
+                                    currentPage === page
+                                        ? "text-white shadow-md"
+                                        : "text-gray-700 bg-white border border-gray-300 hover:border-gray-400"
+                                }`}
+                                style={{
+                                    backgroundColor: currentPage === page ? COLOR_TEXT_DARK : undefined,
+                                    color: currentPage === page ? COLOR_CARD_BG : undefined,
+                                }}
+                            >
+                                {page}
+                            </button>
+                        ))}
+                    </div>
 
-                    <button
-                        onClick={handleNextPage}
-                        disabled={currentPage === totalPages}
-                        className="flex items-center gap-1 px-3 py-2 rounded-lg font-semibold text-sm transition-all disabled:opacity-50"
-                        style={{ backgroundColor: COLOR_ACCENT, color: COLOR_TEXT_DARK }}
-                    >
-                        Next <ChevronRight className="w-4 h-4" />
-                    </button>
-                </div>
-            )}
+                    <button
+                        onClick={handleNextPage}
+                        disabled={currentPage === totalPages}
+                        className="flex items-center gap-1 px-3 py-2 rounded-lg font-semibold text-sm transition-all disabled:opacity-50"
+                        style={{ backgroundColor: COLOR_ACCENT, color: COLOR_TEXT_DARK }}
+                    >
+                        Next <ChevronRight className="w-4 h-4" />
+                    </button>
+                </div>
+            )}
           </div>
         )}
-        
+        
         {/* Empty State */}
         {!isLoading && !error && packages.length === 0 && (
             <div className="p-10 text-center rounded-xl border" style={{ color: COLOR_MUTED, backgroundColor: COLOR_CARD_BG, borderColor: COLOR_MUTED + '30' }}>
@@ -627,7 +629,8 @@ const PackageModal: React.FC<PackageModalProps> = ({ pkg, onClose, onSave, isLoa
             </p>
           </div>
 
-          {/* Genesis Eligibility Indicator */}
+          {/* Genesis Eligibility Indicator 🛑 Temporarily Removed */}
+          {/*
           <div className={`p-3 rounded-lg border ${formData.isGenesisEligible ? 'bg-teal-50 border-teal-300' : 'bg-red-50 border-red-300'}`}>
             <label className="flex items-center space-x-2">
               <input 
@@ -646,6 +649,7 @@ const PackageModal: React.FC<PackageModalProps> = ({ pkg, onClose, onSave, isLoa
                 Required sessions for eligibility: {GENESIS_CONFIG.minSessions}. Current: {safeSessions}.
             </p>
           </div>
+          */}
 
           <div className="flex justify-end space-x-3 pt-4">
             <button
@@ -667,8 +671,8 @@ const PackageModal: React.FC<PackageModalProps> = ({ pkg, onClose, onSave, isLoa
             </button>
           </div>
         </form>
-      </div>
-    </div>
+        </div>
+        </div>
   )
 }
 
