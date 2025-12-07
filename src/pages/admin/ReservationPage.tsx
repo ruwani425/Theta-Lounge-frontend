@@ -49,11 +49,12 @@ interface PackageDetails {
 }
 
 interface Appointment {
-  id: string;
-  clientName: string | null;
-  email: string | null;
-  contactNumber: string | null;
-  sessionDate: string;
+  reservationId: string;
+  id: string;
+  clientName: string | null;
+  email: string | null;
+  contactNumber: string | null;
+  sessionDate: string;
   sessionTime: string;
   status: "pending" | "completed" | "cancelled";
   specialNote: string | null;
@@ -286,6 +287,7 @@ export default function ReservationsPage() {
 
         const mappedAppointments = response.data.map((app: any) => ({
           id: app._id,
+          reservationId: app.reservationId,
           clientName: app.name || "N/A",
           email: app.email,
           contactNumber: app.contactNumber,
@@ -631,7 +633,6 @@ export default function ReservationsPage() {
               </thead>
               <tbody>
                 {filteredAppointments.map((appointment, index) => {
-                  
                   // Prepare the number for the WhatsApp link
                   const whatsappNumber = formatSLNumberForWhatsApp(appointment.contactNumber);
                   // Display the number in domestic format with the country code visible
@@ -656,7 +657,8 @@ export default function ReservationsPage() {
                         className="px-6 py-4 font-medium"
                         style={{ color: COLOR_TEXT_DARK }}
                       >
-                        {"TLB-" + index + 1}
+                        {/* MODIFIED: Use the actual reservationId */}
+                        {appointment.reservationId}
                       </td>
                       <td
                         className="px-6 py-4 font-medium"

@@ -46,13 +46,16 @@ interface PackageActivation {
   phone: string;
   address: string;
   message?: string;
+  // NOTE: packageId is defined as an object in the interface,
+  // but the runtime error suggests it can be null/undefined.
+  // We will treat it as potentially nullable in the runtime logic.
   packageId: {
     _id: string;
     name: string;
     duration: string;
     sessions: number;
     totalPrice: number;
-  };
+  } | null; // Added | null for safety
   packageName: string;
   totalSessions: number;
   usedCount: number;
@@ -256,7 +259,7 @@ const PackageActivationManage: React.FC = () => {
   };
 
   // Format date helper
-  const formatDate = (dateString: string) => {
+  const formatDate = (dateString: string | undefined) => {
     if (!dateString) return "N/A";
     return new Date(dateString).toLocaleDateString("en-US", {
       year: "numeric",
@@ -490,7 +493,8 @@ const PackageActivationManage: React.FC = () => {
                                   {activation.packageName}
                                 </p>
                                 <p className="text-[10px] text-gray-500 truncate">
-                                  {activation.packageId.duration}
+                                  {/* FIX 1: Safely access packageId.duration */}
+                                  {activation.packageId?.duration || "N/A"} 
                                 </p>
                               </div>
                             </td>
@@ -786,7 +790,8 @@ const PackageActivationManage: React.FC = () => {
                         <div className="flex justify-between items-center">
                           <span className="text-sm text-gray-600">Duration:</span>
                           <span className="font-semibold">
-                            {selectedActivation.packageId.duration}
+                            {/* FIX 2: Safely access packageId.duration in details panel */}
+                            {selectedActivation.packageId?.duration || "N/A"}
                           </span>
                         </div>
                         <div className="flex justify-between items-center">
@@ -798,7 +803,8 @@ const PackageActivationManage: React.FC = () => {
                         <div className="flex justify-between items-center">
                           <span className="text-sm text-gray-600">Price:</span>
                           <span className="font-bold text-green-600">
-                            {formatCurrency(selectedActivation.packageId.totalPrice)}
+                            {/* FIX 3: Safely access packageId.totalPrice */}
+                            {formatCurrency(selectedActivation.packageId?.totalPrice || 0)}
                           </span>
                         </div>
                       </div>
@@ -843,7 +849,8 @@ const PackageActivationManage: React.FC = () => {
                               Start Date:
                             </span>
                             <span className="text-sm font-semibold">
-                              {formatDate(selectedActivation.startDate!)}
+                              {/* FIX 4: Safely pass startDate to formatDate */}
+                              {formatDate(selectedActivation.startDate)}
                             </span>
                           </div>
                           <div className="flex justify-between items-center">
@@ -851,7 +858,8 @@ const PackageActivationManage: React.FC = () => {
                               Expiry Date:
                             </span>
                             <span className="text-sm font-semibold text-orange-600">
-                              {formatDate(selectedActivation.expiryDate!)}
+                              {/* FIX 5: Safely pass expiryDate to formatDate */}
+                              {formatDate(selectedActivation.expiryDate)}
                             </span>
                           </div>
                         </div>
@@ -928,4 +936,3 @@ const PackageActivationManage: React.FC = () => {
 };
 
 export default PackageActivationManage;
-

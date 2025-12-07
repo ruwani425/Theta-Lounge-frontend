@@ -1,6 +1,6 @@
 "use client";
 import React, { useState, useEffect, useCallback } from "react";
-import { Plus, X, Edit, Clock } from "lucide-react"; // Removed Shield
+import { Plus, X, Edit, Clock } from "lucide-react"; 
 import Swal from "sweetalert2";
 import apiRequest from "../../core/axios";
 
@@ -11,21 +11,33 @@ const COLOR_ACCENT = "#A8D8EA";
 const COLOR_MUTED = "#5E7B9D";
 const COLOR_CARD_BG = "#FFFFFF";
 
-// --- DATA STRUCTURES (Matching Backend Interface) ---
+// --- DATA STRUCTURES ---
 
 interface PackageConfig {
   _id?: string;
   name: string;
   duration: "1-Month" | "6-Month" | "12-Month" | string;
   sessions: number;
-  pricePerSlot: number;
   totalPrice: number;
   discount: number;
   isGenesisEligible: boolean;
-  isActive: boolean; // Must be present for the toggle
+  isActive: boolean;
 }
 
-// Genesis Collective Configuration (Static data from BRD Appendix B)
+// System Settings Interface (to match your backend schema)
+interface SystemSettings {
+  defaultFloatPrice: number;
+  cleaningBuffer: number;
+  sessionDuration: number | string;
+  sessionsPerDay: number;
+  openTime: string;
+  closeTime: string;
+  numberOfTanks: number;
+  tankStaggerInterval: number;
+  actualCloseTime?: string;
+}
+
+// Genesis Collective Configuration (Now only using static non-price data)
 const GENESIS_CONFIG = {
   maxMembers: 100,
   minSessions: 48,
@@ -51,17 +63,13 @@ const packageApiService = {
     const response: { data: PackageConfig[], pagination: PaginationInfo } = await apiRequest.get(
       `/packages/all?page=${page}&limit=${limit}`
     );
-    
-    console.log('📦 Packages API Response:', {
-      totalPackages: response.data?.length,
-      pagination: response.pagination,
-    });
-    
     return response;
   },
   createPackage: async (
     pkg: Partial<PackageConfig>
   ): Promise<{ data: PackageConfig }> => {
+    // Note: pricePerSlot is handled on the backend based on defaultFloatPrice,
+    // so we only send the fields that are directly editable/storable.
     const response = await apiRequest.post("/packages", pkg);
     return response as { data: PackageConfig };
   },
@@ -74,9 +82,25 @@ const packageApiService = {
   },
 };
 
-// --- UTILITY FUNCTIONS (Unchanged) ---
-const calculatePerFloat = (totalPrice: number, sessions: number): string => {
-  if (sessions === 0) return "N/A";
+// NEW API Service for System Settings
+const settingsApiService = {
+    getSystemSettings: async (): Promise<SystemSettings> => {
+        // Uses the endpoint you provided: /api/system-settings (GET)
+        const response = await apiRequest.get("/system-settings");
+        return response as SystemSettings;
+    }
+}
+
+// --- UTILITY FUNCTIONS ---
+
+/**
+ * Calculates the average discounted price per float using the dynamic base price.
+ * @param totalPrice The final discounted price of the package.
+ * @param sessions The total number of sessions.
+ * @returns The formatted discounted price per float, or "N/A".
+ */
+const calculateDiscountedPerFloat = (totalPrice: number, sessions: number): string => {
+  if (sessions === 0 || totalPrice === 0) return "N/A";
   return (totalPrice / sessions)
     .toFixed(0)
     .replace(/\B(?=(\d{3})+(?!\d))/g, ",");
@@ -92,7 +116,7 @@ const getEligibilityStatus = (
   return "Not Eligible";
 };
 
-// --- TOGGLE BUTTON COMPONENT ---
+// --- TOGGLE BUTTON COMPONENT (Unchanged) ---
 
 interface ActiveToggleProps {
   pkgId: string;
@@ -174,50 +198,74 @@ const PackageManagementPage: React.FC = () => {
   );
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  
+  
+  // NEW STATE: To hold the default base price fetched from settings
+  const [defaultBasePrice, setDefaultBasePrice] = useState<number | null>(null);
+
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [pagination, setPagination] = useState<PaginationInfo | null>(null);
   const itemsPerPage = 10;
 
   // --- Data Fetching ---
+
+  // New function to fetch settings
+  const fetchSettings = useCallback(async () => {
+    try {
+        const settings = await settingsApiService.getSystemSettings();
+        // Assuming the API returns null if no settings are found, use a fallback of 15000
+        setDefaultBasePrice(settings?.defaultFloatPrice || 15000);
+    } catch (err: any) {
+        console.error("❌ Failed to fetch system settings:", err);
+        // Set a fallback price if API fails
+        setDefaultBasePrice(15000);
+        setError("Could not load base price. Using default fallback.");
+    }
+  }, []);
+
   const fetchPackages = useCallback(async (page: number = 1) => {
     setIsLoading(true);
     setError(null);
     try {
-        console.log('🔄 Fetching packages from API...', { page, itemsPerPage });
-        // Fetch packages with pagination
         const response = await packageApiService.fetchPackages(page, itemsPerPage);
-        console.log('✅ Packages loaded successfully:', {
-          count: response.data?.length,
-          pagination: response.pagination,
-        });
         setPackages(response.data);
         setPagination(response.pagination);
         setCurrentPage(page);
     } catch (err: any) {
         console.error("❌ Failed to fetch packages:", err);
-        console.error("Error details:", {
-          message: err.message,
-          response: err.response,
-          data: err.response?.data,
-        });
         setError(err.message || "Failed to load packages from the server.");
     } finally {
         setIsLoading(false);
     }
   }, [itemsPerPage]);
 
+  // Combined effect hook for initial loading
   useEffect(() => {
+    // 1. Fetch System Settings first
+    fetchSettings();
+    // 2. Fetch Packages
     fetchPackages(1);
-  }, [fetchPackages]);
+  }, [fetchSettings, fetchPackages]);
 
+  // Show loading indicator until base price is loaded
+  const isInitialLoading = isLoading || defaultBasePrice === null;
+  if (defaultBasePrice === null) {
+      // Return loading state while waiting for base price
+      return (
+          <div className="min-h-screen p-6 flex justify-center items-center" style={{ backgroundColor: COLOR_BG_LIGHT }}>
+              <div className="text-center p-10 text-xl font-medium" style={{ color: COLOR_TEXT_DARK }}>
+                  Loading configuration... ⚙️
+              </div>
+          </div>
+      );
+  }
+  
   // --- Handlers ---
   const handleCreateOrUpdate = async (pkg: PackageConfig) => {
     setIsLoading(true);
     try {
       if (pkg._id) {
-        // UPDATE: Send all updatable fields, backend recalculates derived fields
+        // UPDATE: Send all updatable fields
         const { _id, ...updates } = pkg;
         const response = await packageApiService.updatePackage(_id, updates);
         Swal.fire(
@@ -227,16 +275,15 @@ const PackageManagementPage: React.FC = () => {
         );
       } else {
         // CREATE
-        const { name, duration, sessions, pricePerSlot, discount, isActive } =
-          pkg;
+        // Only send necessary fields to backend. Backend will calculate totalPrice based on sessions, discount, and system settings base price.
+        const { name, duration, sessions, discount, isActive } = pkg;
         const response = await packageApiService.createPackage({
           name,
           duration,
           sessions,
-          pricePerSlot,
           discount,
           isActive,
-        });
+        } as Partial<PackageConfig>); 
         Swal.fire(
           "Created!",
           `Package ${response.data.name} created successfully.`,
@@ -254,8 +301,6 @@ const PackageManagementPage: React.FC = () => {
       setIsLoading(false);
     }
   };
-
-  // NOTE: handleDelete (Delete icon) is removed as requested.
 
   const handleOpenModal = (pkg: PackageConfig | null = null) => {
     setEditingPackage(pkg);
@@ -279,7 +324,6 @@ const PackageManagementPage: React.FC = () => {
                 name: "",
                 duration: "1-Month",
                 sessions: 0,
-                pricePerSlot: 0,
                 totalPrice: 0,
                 discount: 0,
                 isGenesisEligible: false,
@@ -288,16 +332,14 @@ const PackageManagementPage: React.FC = () => {
             } // Pre-fill new package with 'Active: true'
             className="flex items-center gap-2 px-4 py-2 font-medium rounded-lg shadow-md transition-all hover:opacity-90"
             style={{ backgroundColor: COLOR_TEXT_DARK, color: COLOR_CARD_BG }}
-            disabled={isLoading}
+            disabled={isInitialLoading}
           >
             <Plus className="w-5 h-5" />
             Create New Package
           </button>
         </div>
 
-        {/* The 'Genesis Collective Dashboard' div block is removed from here. */}
-
-        {/* Loading / Error States (Unchanged) */}
+        {/* Loading / Error States */}
         {isLoading && packages.length === 0 && (
           <div
             className="text-center p-10 text-xl font-medium"
@@ -350,12 +392,7 @@ const PackageManagementPage: React.FC = () => {
                   >
                     Duration
                   </th>
-                  <th
-                    className="px-6 py-4 text-left font-semibold"
-                    style={{ color: COLOR_TEXT_DARK }}
-                  >
-                    Price Per Slot (LKR)
-                  </th>
+                  {/* REMOVED Per Float Rate (Average, Discounted) COLUMN HEADER */}
                   <th
                     className="px-6 py-4 text-left font-semibold"
                     style={{ color: COLOR_TEXT_DARK }}
@@ -368,7 +405,6 @@ const PackageManagementPage: React.FC = () => {
                   >
                     Discount
                   </th>
-                  {/* Renamed Genesis to Status */}
                   <th
                     className="px-6 py-4 text-left font-semibold"
                     style={{ color: COLOR_TEXT_DARK }}
@@ -409,12 +445,7 @@ const PackageManagementPage: React.FC = () => {
                     <td className="px-6 py-4" style={{ color: COLOR_MUTED }}>
                       {pkg.duration}
                     </td>
-                    <td
-                      className="px-6 py-4"
-                      style={{ color: COLOR_TEXT_DARK }}
-                    >
-                      {pkg.pricePerSlot.toLocaleString("en-US")}
-                    </td>
+                    {/* REMOVED Per Float Rate (Average, Discounted) COLUMN DATA */}
                     <td
                       className="px-6 py-4 font-semibold"
                       style={{ color: COLOR_TEXT_DARK }}
@@ -451,7 +482,6 @@ const PackageManagementPage: React.FC = () => {
                       >
                         <Edit className="w-5 h-5 inline" />
                       </button>
-                      {/* Removed Delete Icon */}
                     </td>
                   </tr>
                 ))}
@@ -465,8 +495,21 @@ const PackageManagementPage: React.FC = () => {
           <div className="mt-6 flex items-center justify-between">
             {/* Pagination Info */}
             <div className="text-sm" style={{ color: COLOR_MUTED }}>
-              Showing <span className="font-semibold" style={{ color: COLOR_TEXT_DARK }}>{packages.length}</span> of{' '}
-              <span className="font-semibold" style={{ color: COLOR_TEXT_DARK }}>{pagination.total}</span> packages
+              Showing{" "}
+              <span
+                className="font-semibold"
+                style={{ color: COLOR_TEXT_DARK }}
+              >
+                {packages.length}
+              </span>{" "}
+              of{" "}
+              <span
+                className="font-semibold"
+                style={{ color: COLOR_TEXT_DARK }}
+              >
+                {pagination.total}
+              </span>{" "}
+              packages
             </div>
 
             {/* Pagination Buttons */}
@@ -477,7 +520,9 @@ const PackageManagementPage: React.FC = () => {
                 disabled={!pagination.hasPrevPage}
                 className="px-4 py-2 rounded-lg font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{
-                  backgroundColor: pagination.hasPrevPage ? COLOR_TEXT_DARK : COLOR_MUTED + '40',
+                  backgroundColor: pagination.hasPrevPage
+                    ? COLOR_TEXT_DARK
+                    : COLOR_MUTED + "40",
                   color: COLOR_CARD_BG,
                 }}
               >
@@ -491,11 +536,13 @@ const PackageManagementPage: React.FC = () => {
                     key={page}
                     onClick={() => fetchPackages(page)}
                     className={`px-3 py-2 rounded-lg font-medium transition-all ${
-                      page === currentPage ? 'ring-2' : ''
+                      page === currentPage ? "ring-2" : ""
                     }`}
                     style={{
-                      backgroundColor: page === currentPage ? COLOR_TEXT_DARK : COLOR_BG_LIGHT,
-                      color: page === currentPage ? COLOR_CARD_BG : COLOR_TEXT_DARK,
+                      backgroundColor:
+                        page === currentPage ? COLOR_TEXT_DARK : COLOR_BG_LIGHT,
+                      color:
+                        page === currentPage ? COLOR_CARD_BG : COLOR_TEXT_DARK,
                       borderColor: COLOR_ACCENT,
                     }}
                   >
@@ -510,7 +557,9 @@ const PackageManagementPage: React.FC = () => {
                 disabled={!pagination.hasNextPage}
                 className="px-4 py-2 rounded-lg font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{
-                  backgroundColor: pagination.hasNextPage ? COLOR_TEXT_DARK : COLOR_MUTED + '40',
+                  backgroundColor: pagination.hasNextPage
+                    ? COLOR_TEXT_DARK
+                    : COLOR_MUTED + "40",
                   color: COLOR_CARD_BG,
                 }}
               >
@@ -544,21 +593,22 @@ const PackageManagementPage: React.FC = () => {
             onClose={() => setIsModalOpen(false)}
             onSave={handleCreateOrUpdate}
             isLoading={isLoading}
+            defaultBasePrice={defaultBasePrice} // Pass base price to modal
           />
         )}
       </div>
-      {/* Removed Shield Icon import for main component since it's only used in the removed section */}
     </div>
   );
 };
 
-// --- MODAL COMPONENT (Adjusted to include isActive in form data) ---
+// --- MODAL COMPONENT (Adjusted) ---
 
 interface PackageModalProps {
   pkg: PackageConfig | null;
   onClose: () => void;
   onSave: (pkg: PackageConfig) => void;
   isLoading: boolean;
+  defaultBasePrice: number; // New required prop
 }
 
 const PackageModal: React.FC<PackageModalProps> = ({
@@ -566,44 +616,68 @@ const PackageModal: React.FC<PackageModalProps> = ({
   onClose,
   onSave,
   isLoading,
+  defaultBasePrice, // Destructure new prop
 }) => {
-  const [formData, setFormData] = useState<PackageConfig>(
-    pkg ||
-      ({
-        name: "",
-        duration: "1-Month",
-        sessions: 0,
-        pricePerSlot: 0,
-        totalPrice: 0,
-        discount: 0,
-        isGenesisEligible: false,
-        isActive: true, // Default new package to Active
-      } as PackageConfig)
-  );
+    // Define a new interface for form data to allow string for empty states
+    interface FormDataState extends Omit<PackageConfig, 'sessions' | 'discount' | 'totalPrice' | 'isGenesisEligible'> {
+      sessions: number | string;
+      discount: number | string;
+      totalPrice: number; // Keep this as number for the calculation display
+      isGenesisEligible: boolean;
+    }
+    
+    // Default state for a new package
+    const initialNewPackageState: FormDataState = {
+      name: "",
+      duration: "1-Month",
+      sessions: "", // Default to empty string
+      totalPrice: 0,
+      discount: "", // Default to empty string
+      isGenesisEligible: false,
+      isActive: true,
+    };
+
+    const [formData, setFormData] = useState<FormDataState>(
+      // If editing, use package data; otherwise, use the empty state
+      pkg 
+        ? { ...pkg, sessions: pkg.sessions, discount: pkg.discount } as FormDataState 
+        : initialNewPackageState
+    );
 
   const isEditing = !!pkg;
 
-  const finalPricePerFloat =
-    formData.totalPrice > 0 && formData.sessions > 0
-      ? (formData.totalPrice / formData.sessions)
-          .toFixed(0)
-          .replace(/\B(?=(\d{3})+(?!\d))/g, ",")
-      : "N/A";
+    // Safely convert sessions and discount to numbers for calculation and validation
+    const sessionsNum = Number(formData.sessions) || 0;
+    const discountNum = Number(formData.discount) || 0;
 
+
+  // Calculate Per Float Rate (Discounted) for display in the modal
+  const finalPricePerFloatDisplay = calculateDiscountedPerFloat(
+    formData.totalPrice,
+    sessionsNum
+  );
+
+  // Recalculate totalPrice whenever sessions or discount changes.
   useEffect(() => {
-    const originalTotal = formData.sessions * formData.pricePerSlot;
-    const discountFactor = (100 - formData.discount) / 100;
+    // Ensure calculation uses numerical values
+    const sessionsForCalc = Number(formData.sessions) || 0;
+    const discountForCalc = Number(formData.discount) || 0;
+
+    // USE DYNAMIC BASE PRICE: This is the equivalent of the old sessions * pricePerSlot
+    const originalTotal = sessionsForCalc * defaultBasePrice;
+    const discountFactor = (100 - discountForCalc) / 100;
 
     const calculatedTotal = originalTotal * discountFactor;
 
-    const isEligible = formData.sessions >= GENESIS_CONFIG.minSessions;
+    const isEligible = sessionsForCalc >= GENESIS_CONFIG.minSessions;
 
+    // We must update the state using the defined FormDataState structure
     setFormData((prev) => ({
       ...prev,
       totalPrice: Math.round(calculatedTotal), // Round to nearest LKR
       isGenesisEligible: isEligible,
     }));
-  }, [formData.sessions, formData.pricePerSlot, formData.discount]);
+  }, [formData.sessions, formData.discount, defaultBasePrice]); // Dependency on defaultBasePrice
 
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
@@ -612,34 +686,42 @@ const PackageModal: React.FC<PackageModalProps> = ({
     let newValue: string | number | boolean = value;
 
     if (type === "number") {
-      newValue = parseInt(value) || 0;
+      // If the value is an empty string, set the state value to an empty string to clear the input
+      newValue = value === "" ? "" : (parseInt(value) || 0);
     }
 
-    if (name === "sessions" || name === "pricePerSlot" || name === "discount") {
-      setFormData((prev) => ({ ...prev, [name]: newValue as number }));
-    } else {
-      setFormData((prev) => ({ ...prev, [name]: newValue }));
-    }
+    // Ensure we only update fields present in FormDataState
+    setFormData((prev) => ({ ...prev, [name]: newValue }));
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
+    const sessionsFinal = Number(formData.sessions);
+    // Discount defaults to 0 if empty
+    const discountFinal = Number(formData.discount) || 0; 
+    
     if (
       !formData.name ||
-      formData.sessions <= 0 ||
-      formData.pricePerSlot <= 0 ||
+      sessionsFinal <= 0 ||
       formData.totalPrice <= 0
     ) {
       Swal.fire(
         "Error",
-        "Please ensure Package Name, Sessions, and Price Per Slot are all entered and greater than zero.",
+        "Please ensure Package Name, Sessions (must be > 0), and Discount are entered correctly.",
         "error"
       );
       return;
     }
-
-    onSave(formData);
+    
+    // Create the final package object for submission, ensuring number types
+    const packageToSave: PackageConfig = {
+        ...formData,
+        sessions: sessionsFinal,
+        discount: discountFinal,
+    } as PackageConfig;
+    
+    onSave(packageToSave);
   };
 
   return (
@@ -709,7 +791,7 @@ const PackageModal: React.FC<PackageModalProps> = ({
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 gap-4">
             <div>
               <label
                 className="block text-xs font-semibold mb-1"
@@ -730,27 +812,7 @@ const PackageModal: React.FC<PackageModalProps> = ({
                 }}
               />
             </div>
-            {/* Price Per Slot Input (Editable) */}
-            <div>
-              <label
-                className="block text-xs font-semibold mb-1"
-                style={{ color: COLOR_MUTED }}
-              >
-                Price Per Slot (LKR)
-              </label>
-              <input
-                type="number"
-                name="pricePerSlot"
-                value={formData.pricePerSlot}
-                onChange={handleChange}
-                min="0"
-                className="w-full border rounded-lg px-3 py-2"
-                style={{
-                  borderColor: COLOR_MUTED + "40",
-                  color: COLOR_TEXT_DARK,
-                }}
-              />
-            </div>
+            
             <div>
               <label
                 className="block text-xs font-semibold mb-1"
@@ -798,27 +860,30 @@ const PackageModal: React.FC<PackageModalProps> = ({
             />
           </div>
 
-          {/* Per Float Rate (Secondary Calculated Field - Reflects Discount) */}
+          {/* Per Float Rate (Secondary Calculated Field - Updated text) */}
           <div
-            className="p-3 rounded-lg border flex justify-between items-center"
+            className="p-3 rounded-lg border flex flex-col md:flex-row justify-between items-start md:items-center"
             style={{
               backgroundColor: COLOR_BG_LIGHT,
               borderColor: COLOR_ACCENT + "60",
             }}
           >
             <p
-              className="text-sm font-semibold"
+              className="text-sm font-semibold mb-1 md:mb-0"
               style={{ color: COLOR_TEXT_DARK }}
             >
               Per Float Rate (Average, Discounted)
             </p>
-            <p className="text-lg font-bold" style={{ color: COLOR_TEXT_DARK }}>
-              {finalPricePerFloat} LKR
+            <p className="text-lg font-bold text-right" style={{ color: COLOR_TEXT_DARK }}>
+              {finalPricePerFloatDisplay} LKR
               <span
-                className="text-xs font-medium ml-2"
+                className="text-xs font-medium block md:inline md:ml-2"
                 style={{ color: COLOR_MUTED }}
               >
-                (Base Rate: 15,000 LKR)
+                (Base Rate: {defaultBasePrice.toLocaleString(
+                  "en-US"
+                )}{" "}
+                LKR)
               </span>
             </p>
           </div>
