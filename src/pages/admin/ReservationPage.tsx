@@ -65,12 +65,13 @@ interface Appointment {
 }
 
 interface PaginationMeta {
-  currentPage: number;
-  totalPages: number;
-  totalRecords: number;
-  recordsPerPage: number;
-  hasNextPage: boolean;
-  hasPrevPage: boolean;
+  currentPage: number;
+  totalPages: number;
+  totalRecords: number;
+  recordsPerPage: number;
+  limit: number;
+  hasNextPage: boolean;
+  hasPrevPage: boolean;
 }
 
 const reservationApiService = {
@@ -296,24 +297,27 @@ export default function ReservationsPage() {
           packageDetails: app.packageDetails || null,
         })) as Appointment[];
 
-        setAppointments(mappedAppointments);
-        setPagination(response.pagination);
-        setCurrentPage(page);
-      } catch (err: any) {
-        console.error("Error fetching appointments:", err);
-        setError(err?.message || "Failed to load appointments");
-      } finally {
-        setIsLoading(false);
-      }
-    },
-    [startDate, endDate]
-  );
+        setAppointments(mappedAppointments);
+        setPagination({
+                  ...response.pagination,
+                  recordsPerPage: response.pagination.limit, // Map 'limit' to 'recordsPerPage'
+        });
+        setCurrentPage(page);
+      } catch (err: any) {
+      console.error("Error fetching appointments:", err);
+      setError(err?.message || "Failed to load appointments");
+      } finally {
+      setIsLoading(false);
+      }
+      },
+      [startDate, endDate]
+      );
 
-  useEffect(() => {
-    fetchAppointments(1);
-  }, [startDate, endDate, fetchAppointments]);
+  useEffect(() => {
+  fetchAppointments(1);
+  }, [startDate, endDate, fetchAppointments]);
 
-  // Filtering Logic remains unchanged
+// Filtering Logic remains unchanged
 
   const filteredAppointments = appointments.filter((appointment) => {
     const clientName = appointment.clientName || "";
