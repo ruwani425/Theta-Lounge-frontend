@@ -3,14 +3,26 @@ import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import type { PayloadAction } from '@reduxjs/toolkit';
 import { AUTH_ROLE_KEY, AUTH_TOKEN_KEY, getCookie, removeCookie, setCookie, TOKEN_LIFESPAN_DAYS } from '../utils/cookieUtils';
 
+// --- ADDED: Interface for User Data stored in Redux ---
+export interface AuthUser {
+    _id: string;
+    name: string;
+    email: string;
+    profileImage?: string;
+    role: 'admin' | 'client';
+    firebaseUid?: string;
+}
+
 interface AuthState {
     isAuthenticated: boolean;
+    user: AuthUser | null; // <-- FIX: ADDED 'user' PROPERTY
     userRole: 'admin' | 'client' | null;
     isLoading: boolean;
 }
 
 const initialState: AuthState = {
     isAuthenticated: false,
+    user: null, // <-- FIX: Initialize 'user'
     userRole: null, 
     isLoading: true,
 };
@@ -53,7 +65,8 @@ const authSlice = createSlice({
             state.userRole = action.payload.userRole;
             state.isLoading = false;
         },
-        loginAction: (state, action: PayloadAction<{ token?: string; role: 'admin' | 'client' }>) => {
+        // FIX: Added 'user' to the PayloadAction
+        loginAction: (state, action: PayloadAction<{ token?: string; role: 'admin' | 'client'; user?: AuthUser }>) => {
             const token = action.payload.token || `simulated_jwt_token_${action.payload.role}`;
             
             console.log('🔐 Login action:', { 
@@ -75,6 +88,7 @@ const authSlice = createSlice({
 
             state.isAuthenticated = true;
             state.userRole = action.payload.role;
+            state.user = action.payload.user || null; // <-- FIX: SET USER DATA
             state.isLoading = false;
         },
         logoutAction: (state) => {
@@ -90,6 +104,7 @@ const authSlice = createSlice({
             
             state.isAuthenticated = false;
             state.userRole = null;
+            state.user = null; // <-- FIX: CLEAR USER DATA
             state.isLoading = false;
         },
     },

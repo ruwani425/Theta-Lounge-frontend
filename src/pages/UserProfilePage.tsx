@@ -1,20 +1,31 @@
 import React, { useState, useEffect } from 'react';
-import { User, Mail, Package, Clock, CheckCircle, XCircle, AlertCircle, Phone } from 'lucide-react';
+import { User, Mail, Package, Clock, CheckCircle, XCircle, AlertCircle, Phone, Calendar } from 'lucide-react';
 import apiRequest from '../core/axios';
 import Swal from 'sweetalert2';
 import { useAuth } from '../components/AuthProvider';
 import { getCookie, AUTH_TOKEN_KEY } from '../utils/cookieUtils';
 import Avatar from '../components/Avatar';
+import type { AuthUser } from '../redux/authSlice';
 
-interface UserProfile {
+// --- ADDED: Generic API Response Type ---
+interface ApiResponse<T> {
+  success: boolean;
+  message: string;
+  data: T;
+}
+
+// --- UPDATED: UserProfile interface to align with DB/API response ---
+interface UserProfile extends AuthUser {
   _id: string;
   name: string;
   email: string;
   role: 'admin' | 'client';
   profileImage?: string;
   createdAt: string;
+  updatedAt: string;
 }
 
+// --- EXISTING: PackageActivation Interface ---
 interface PackageActivation {
   _id: string;
   packageName: string;
@@ -32,6 +43,18 @@ interface PackageActivation {
     sessions: number;
     totalPrice: number;
   };
+}
+
+// --- NEW: Appointment (Reservation) Interface ---
+interface Appointment {
+  _id: string;
+  date: string; // YYYY-MM-DD format
+  time: string; // HH:mm format
+  status: 'Pending' | 'Confirmed' | 'Canceled' | 'Completed';
+  service: string;
+  specialNote?: string;
+  isPackageUser: boolean;
+  createdAt: string;
 }
 
 const COLORS = {
@@ -52,12 +75,17 @@ const UserProfilePage: React.FC = () => {
   const { user: authUser } = useAuth();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [packages, setPackages] = useState<PackageActivation[]>([]);
+  const [reservations, setReservations] = useState<Appointment[]>([]); // NEW state for reservations
   const [loading, setLoading] = useState(true);
   const [loadingPackages, setLoadingPackages] = useState(true);
+  const [loadingReservations, setLoadingReservations] = useState(true); // NEW loading state
+  const [activeTab, setActiveTab] = useState<'packages' | 'reservations'>('packages'); // NEW tab state
 
   useEffect(() => {
     fetchProfile();
     fetchMyPackages();
+    // Fetch reservations immediately to populate data
+    fetchMyReservations(); 
   }, []);
 
   const fetchProfile = async () => {
@@ -74,7 +102,7 @@ const UserProfilePage: React.FC = () => {
         return;
       }
 
-      const response = await apiRequest.get('/users/me');
+      const response: ApiResponse<UserProfile> = await apiRequest.get('/users/me');
 
       if (response.success) {
         setProfile(response.data);
@@ -95,7 +123,7 @@ const UserProfilePage: React.FC = () => {
     try {
       setLoadingPackages(true);
       
-      const response = await apiRequest.get('/users/me/packages');
+      const response: ApiResponse<PackageActivation[]> = await apiRequest.get('/users/me/packages');
 
       if (response.success) {
         setPackages(response.data);
@@ -107,15 +135,38 @@ const UserProfilePage: React.FC = () => {
     }
   };
 
+  // --- NEW: Fetch Reservations Function ---
+  const fetchMyReservations = async () => {
+    try {
+      setLoadingReservations(true);
+      
+      // NOTE: You need to ensure a GET route exists for '/appointments/me' or similar
+      // The current backend routes don't explicitly show this, so we'll assume it exists.
+      const response: ApiResponse<Appointment[]> = await apiRequest.get('/appointments/me'); 
+
+      if (response.success) {
+        setReservations(response.data);
+      }
+    } catch (error: any) {
+      console.error('Error fetching reservations:', error);
+      // Handle 404/403 gracefully if endpoint is missing/restricted
+    } finally {
+      setLoadingReservations(false);
+    }
+  };
+
+
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'Confirmed':
+      case 'Completed':
         return <CheckCircle className="w-5 h-5" style={{ color: COLORS.success }} />;
       case 'Pending':
         return <Clock className="w-5 h-5" style={{ color: COLORS.warning }} />;
       case 'Contacted':
         return <Phone className="w-5 h-5" style={{ color: COLORS.primary }} />;
       case 'Rejected':
+      case 'Canceled':
         return <XCircle className="w-5 h-5" style={{ color: COLORS.error }} />;
       default:
         return <AlertCircle className="w-5 h-5" style={{ color: COLORS.gray600 }} />;
@@ -125,17 +176,36 @@ const UserProfilePage: React.FC = () => {
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'Confirmed':
+      case 'Completed':
         return COLORS.success;
       case 'Pending':
         return COLORS.warning;
       case 'Contacted':
         return COLORS.primary;
       case 'Rejected':
+      case 'Canceled':
         return COLORS.error;
       default:
         return COLORS.gray600;
     }
   };
+
+  const getReservationStatusColor = (status: string) => {
+    switch (status) {
+      case 'Confirmed':
+        return COLORS.success;
+      case 'Pending':
+        return COLORS.warning;
+      case 'Canceled':
+        return COLORS.error;
+      case 'Completed':
+        return COLORS.gray600;
+      default:
+        return COLORS.gray600;
+    }
+  };
+
+  // ... (loading state check remains the same)
 
   if (loading) {
     return (
@@ -148,11 +218,230 @@ const UserProfilePage: React.FC = () => {
     );
   }
 
+  // --- RENDER FUNCTIONS FOR TABS ---
+
+  const renderPackagesTab = () => {
+    if (loadingPackages) {
+      return (
+        <div className="text-center py-12">
+          <div className="animate-spin rounded-full h-12 w-12 border-4 border-t-transparent mx-auto mb-4" style={{ borderColor: COLORS.primary }}></div>
+          <p className="text-sm" style={{ color: COLORS.gray600 }}>Loading packages...</p>
+        </div>
+      );
+    }
+
+    if (packages.length === 0) {
+      return (
+        <div className="text-center py-16">
+          <Package className="w-20 h-20 mx-auto mb-4" style={{ color: COLORS.gray200 }} />
+          <h4 className="text-xl font-bold mb-2" style={{ color: COLORS.gray800 }}>No Package Activations Yet</h4>
+          <p className="text-sm mb-6" style={{ color: COLORS.gray600 }}>
+            You haven't activated any packages yet. Browse our pricing page to get started!
+          </p>
+          <a
+            href="/pricing"
+            className="inline-block px-6 py-3 rounded-lg font-bold text-white transition-all hover:opacity-90"
+            style={{ backgroundColor: COLORS.primary }}
+          >
+            View Packages
+          </a>
+        </div>
+      );
+    }
+    
+    // Existing package list rendering logic
+    return (
+      <div className="space-y-4">
+        {packages.map((pkg) => (
+          <div 
+            key={pkg._id} 
+            className="border-2 rounded-xl p-6 hover:shadow-lg transition-all"
+            style={{ borderColor: COLORS.gray200 }}
+          >
+            {/* Package Header */}
+            <div className="flex items-start justify-between mb-4">
+              <div className="flex-1">
+                <h4 className="text-xl font-bold mb-2" style={{ color: COLORS.gray800 }}>
+                  {pkg.packageName}
+                </h4>
+                {pkg.packageId && (
+                  <div className="flex flex-wrap gap-3 text-sm">
+                    <span className="flex items-center gap-1" style={{ color: COLORS.gray600 }}>
+                      <Clock className="w-4 h-4" />
+                      {pkg.packageId.duration}
+                    </span>
+                    <span className="flex items-center gap-1" style={{ color: COLORS.gray600 }}>
+                      <Package className="w-4 h-4" />
+                      {pkg.packageId.sessions} Sessions
+                    </span>
+                    <span className="font-bold" style={{ color: COLORS.primary }}>
+                      Rs. {pkg.packageId.totalPrice.toLocaleString()}
+                    </span>
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                {getStatusIcon(pkg.status)}
+                <span
+                  className="px-3 py-1 rounded-full text-sm font-bold whitespace-nowrap"
+                  style={{
+                    backgroundColor: `${getStatusColor(pkg.status)}20`,
+                    color: getStatusColor(pkg.status),
+                  }}
+                >
+                  {pkg.status}
+                </span>
+              </div>
+            </div>
+
+            {/* Package Details */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 pt-4 border-t" style={{ borderColor: COLORS.gray200 }}>
+              <div>
+                <p className="text-xs font-bold mb-1" style={{ color: COLORS.gray600 }}>REQUESTED DATE</p>
+                <p className="text-sm font-semibold" style={{ color: COLORS.gray800 }}>
+                  {new Date(pkg.createdAt).toLocaleDateString('en-US', { 
+                    year: 'numeric', 
+                    month: 'long', 
+                    day: 'numeric' 
+                  })}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs font-bold mb-1" style={{ color: COLORS.gray600 }}>CONTACT</p>
+                <p className="text-sm font-semibold" style={{ color: COLORS.gray800 }}>{pkg.phone}</p>
+              </div>
+              {pkg.message && (
+                <div className="md:col-span-2">
+                  <p className="text-xs font-bold mb-1" style={{ color: COLORS.gray600 }}>MESSAGE</p>
+                  <p className="text-sm" style={{ color: COLORS.gray800 }}>{pkg.message}</p>
+                </div>
+              )}
+            </div>
+
+            {/* Status Message */}
+            {pkg.status === 'Confirmed' && (
+              <div className="mt-4 p-3 rounded-lg" style={{ backgroundColor: `${COLORS.success}10` }}>
+                <p className="text-sm font-semibold flex items-center gap-2" style={{ color: COLORS.success }}>
+                  <CheckCircle className="w-4 h-4" />
+                  Package activated! You can now book sessions.
+                </p>
+              </div>
+            )}
+            {pkg.status === 'Pending' && (
+              <div className="mt-4 p-3 rounded-lg" style={{ backgroundColor: `${COLORS.warning}10` }}>
+                <p className="text-sm font-semibold flex items-center gap-2" style={{ color: COLORS.warning }}>
+                  <Clock className="w-4 h-4" />
+                  Your request is being reviewed. We'll contact you soon.
+                </p>
+              </div>
+            )}
+            {pkg.status === 'Contacted' && (
+              <div className="mt-4 p-3 rounded-lg" style={{ backgroundColor: `${COLORS.primary}10` }}>
+                <p className="text-sm font-semibold flex items-center gap-2" style={{ color: COLORS.primary }}>
+                  <Phone className="w-4 h-4" />
+                  We've reached out to you. Please check your email/phone.
+                </p>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  const renderReservationsTab = () => {
+    if (loadingReservations) {
+      return (
+        <div className="text-center py-12">
+          <div className="animate-spin rounded-full h-12 w-12 border-4 border-t-transparent mx-auto mb-4" style={{ borderColor: COLORS.primary }}></div>
+          <p className="text-sm" style={{ color: COLORS.gray600 }}>Loading reservations...</p>
+        </div>
+      );
+    }
+    
+    if (reservations.length === 0) {
+      return (
+        <div className="text-center py-16">
+          <Calendar className="w-20 h-20 mx-auto mb-4" style={{ color: COLORS.gray200 }} />
+          <h4 className="text-xl font-bold mb-2" style={{ color: COLORS.gray800 }}>No Reservations Found</h4>
+          <p className="text-sm mb-6" style={{ color: COLORS.gray600 }}>
+            You haven't booked any appointments yet. Use our booking page to schedule a session.
+          </p>
+          <a
+            href="/book"
+            className="inline-block px-6 py-3 rounded-lg font-bold text-white transition-all hover:opacity-90"
+            style={{ backgroundColor: COLORS.primary }}
+          >
+            Book Now
+          </a>
+        </div>
+      );
+    }
+    
+    return (
+      <div className="space-y-4">
+        {reservations.map((res) => (
+          <div 
+            key={res._id} 
+            className="border-2 rounded-xl p-6 hover:shadow-lg transition-all"
+            style={{ borderColor: COLORS.gray200 }}
+          >
+            <div className="flex items-start justify-between mb-4">
+              <div className="flex-1">
+                <h4 className="text-xl font-bold mb-1" style={{ color: COLORS.gray800 }}>
+                  {res.service}
+                </h4>
+                <p className="text-sm font-medium" style={{ color: COLORS.gray600 }}>
+                  {res.isPackageUser ? 'Package Session' : 'Standard Booking'}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                {getStatusIcon(res.status)}
+                <span
+                  className="px-3 py-1 rounded-full text-sm font-bold whitespace-nowrap"
+                  style={{
+                    backgroundColor: `${getReservationStatusColor(res.status)}20`,
+                    color: getReservationStatusColor(res.status),
+                  }}
+                >
+                  {res.status.toUpperCase()}
+                </span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4 mt-4 pt-4 border-t" style={{ borderColor: COLORS.gray200 }}>
+              <div>
+                <p className="text-xs font-bold mb-1" style={{ color: COLORS.gray600 }}>DATE & TIME</p>
+                <p className="text-sm font-semibold" style={{ color: COLORS.gray800 }}>
+                  {new Date(res.date).toLocaleDateString()} at {res.time}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs font-bold mb-1" style={{ color: COLORS.gray600 }}>BOOKED ON</p>
+                <p className="text-sm font-semibold" style={{ color: COLORS.gray800 }}>
+                  {new Date(res.createdAt).toLocaleDateString()}
+                </p>
+              </div>
+            </div>
+
+            {res.specialNote && (
+              <div className="mt-4 p-3 rounded-lg" style={{ backgroundColor: COLORS.gray100 }}>
+                <p className="text-xs font-bold mb-1" style={{ color: COLORS.gray600 }}>NOTE</p>
+                <p className="text-sm" style={{ color: COLORS.gray800 }}>{res.specialNote}</p>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    );
+  };
+  
+  // --- MAIN RENDER ---
   return (
     <div className="min-h-screen pt-20" style={{ backgroundColor: COLORS.gray50 }}>
       <div className="max-w-7xl mx-auto p-6">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Profile Card */}
+          {/* Profile Card (Left Side) - Remains largely the same */}
           <div className="lg:col-span-1">
             <div className="rounded-xl border p-6 shadow-md sticky top-24" style={{ backgroundColor: COLORS.white, borderColor: COLORS.gray200 }}>
               <div className="text-center">
@@ -204,145 +493,58 @@ const UserProfilePage: React.FC = () => {
                         {packages.length}
                       </span>
                     </div>
+                    <div className="flex justify-between">
+                      <span className="text-sm font-medium" style={{ color: COLORS.gray600 }}>Total Reservations</span>
+                      <span className="text-sm font-bold" style={{ color: COLORS.gray800 }}>
+                        {reservations.length}
+                      </span>
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Packages Section */}
+          {/* Tabbed Section (Right Side) */}
           <div className="lg:col-span-2">
             <div className="rounded-xl border p-6 shadow-md" style={{ backgroundColor: COLORS.white, borderColor: COLORS.gray200 }}>
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="text-2xl font-bold flex items-center gap-3" style={{ color: COLORS.gray800 }}>
-                  <Package className="w-7 h-7" style={{ color: COLORS.primary }} />
-                  My Package Activations
-                </h3>
-                <span 
-                  className="px-4 py-2 rounded-full text-sm font-bold"
-                  style={{ backgroundColor: `${COLORS.primary}20`, color: COLORS.primary }}
+              
+              {/* --- Tabs Navigation --- */}
+              <div className="flex border-b mb-6" style={{ borderColor: COLORS.gray200 }}>
+                
+                <button
+                  className={`flex items-center gap-2 py-3 px-4 text-lg font-bold transition-colors ${
+                    activeTab === 'packages' 
+                      ? 'border-b-4' 
+                      : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                  style={{ borderColor: activeTab === 'packages' ? COLORS.primary : 'transparent', color: activeTab === 'packages' ? COLORS.primary : COLORS.gray600 }}
+                  onClick={() => setActiveTab('packages')}
                 >
-                  {packages.length} {packages.length === 1 ? 'Package' : 'Packages'}
-                </span>
+                  <Package className="w-5 h-5" />
+                  Package Activations
+                </button>
+                
+                <button
+                  className={`flex items-center gap-2 py-3 px-4 text-lg font-bold transition-colors ${
+                    activeTab === 'reservations' 
+                      ? 'border-b-4' 
+                      : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                  style={{ borderColor: activeTab === 'reservations' ? COLORS.primary : 'transparent', color: activeTab === 'reservations' ? COLORS.primary : COLORS.gray600 }}
+                  onClick={() => setActiveTab('reservations')}
+                >
+                  <Calendar className="w-5 h-5" />
+                  My Reservations
+                </button>
               </div>
 
-              {loadingPackages ? (
-                <div className="text-center py-12">
-                  <div className="animate-spin rounded-full h-12 w-12 border-4 border-t-transparent mx-auto mb-4" style={{ borderColor: COLORS.primary }}></div>
-                  <p className="text-sm" style={{ color: COLORS.gray600 }}>Loading packages...</p>
-                </div>
-              ) : packages.length > 0 ? (
-                <div className="space-y-4">
-                  {packages.map((pkg) => (
-                    <div 
-                      key={pkg._id} 
-                      className="border-2 rounded-xl p-6 hover:shadow-lg transition-all"
-                      style={{ borderColor: COLORS.gray200 }}
-                    >
-                      {/* Package Header */}
-                      <div className="flex items-start justify-between mb-4">
-                        <div className="flex-1">
-                          <h4 className="text-xl font-bold mb-2" style={{ color: COLORS.gray800 }}>
-                            {pkg.packageName}
-                          </h4>
-                          {pkg.packageId && (
-                            <div className="flex flex-wrap gap-3 text-sm">
-                              <span className="flex items-center gap-1" style={{ color: COLORS.gray600 }}>
-                                <Clock className="w-4 h-4" />
-                                {pkg.packageId.duration}
-                              </span>
-                              <span className="flex items-center gap-1" style={{ color: COLORS.gray600 }}>
-                                <Package className="w-4 h-4" />
-                                {pkg.packageId.sessions} Sessions
-                              </span>
-                              <span className="font-bold" style={{ color: COLORS.primary }}>
-                                Rs. {pkg.packageId.totalPrice.toLocaleString()}
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {getStatusIcon(pkg.status)}
-                          <span
-                            className="px-3 py-1 rounded-full text-sm font-bold whitespace-nowrap"
-                            style={{
-                              backgroundColor: `${getStatusColor(pkg.status)}20`,
-                              color: getStatusColor(pkg.status),
-                            }}
-                          >
-                            {pkg.status}
-                          </span>
-                        </div>
-                      </div>
+              {/* --- Tabs Content --- */}
+              <div>
+                {activeTab === 'packages' && renderPackagesTab()}
+                {activeTab === 'reservations' && renderReservationsTab()}
+              </div>
 
-                      {/* Package Details */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 pt-4 border-t" style={{ borderColor: COLORS.gray200 }}>
-                        <div>
-                          <p className="text-xs font-bold mb-1" style={{ color: COLORS.gray600 }}>REQUESTED DATE</p>
-                          <p className="text-sm font-semibold" style={{ color: COLORS.gray800 }}>
-                            {new Date(pkg.createdAt).toLocaleDateString('en-US', { 
-                              year: 'numeric', 
-                              month: 'long', 
-                              day: 'numeric' 
-                            })}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-xs font-bold mb-1" style={{ color: COLORS.gray600 }}>CONTACT</p>
-                          <p className="text-sm font-semibold" style={{ color: COLORS.gray800 }}>{pkg.phone}</p>
-                        </div>
-                        {pkg.message && (
-                          <div className="md:col-span-2">
-                            <p className="text-xs font-bold mb-1" style={{ color: COLORS.gray600 }}>MESSAGE</p>
-                            <p className="text-sm" style={{ color: COLORS.gray800 }}>{pkg.message}</p>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Status Message */}
-                      {pkg.status === 'Confirmed' && (
-                        <div className="mt-4 p-3 rounded-lg" style={{ backgroundColor: `${COLORS.success}10` }}>
-                          <p className="text-sm font-semibold flex items-center gap-2" style={{ color: COLORS.success }}>
-                            <CheckCircle className="w-4 h-4" />
-                            Package activated! You can now book sessions.
-                          </p>
-                        </div>
-                      )}
-                      {pkg.status === 'Pending' && (
-                        <div className="mt-4 p-3 rounded-lg" style={{ backgroundColor: `${COLORS.warning}10` }}>
-                          <p className="text-sm font-semibold flex items-center gap-2" style={{ color: COLORS.warning }}>
-                            <Clock className="w-4 h-4" />
-                            Your request is being reviewed. We'll contact you soon.
-                          </p>
-                        </div>
-                      )}
-                      {pkg.status === 'Contacted' && (
-                        <div className="mt-4 p-3 rounded-lg" style={{ backgroundColor: `${COLORS.primary}10` }}>
-                          <p className="text-sm font-semibold flex items-center gap-2" style={{ color: COLORS.primary }}>
-                            <Phone className="w-4 h-4" />
-                            We've reached out to you. Please check your email/phone.
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-16">
-                  <Package className="w-20 h-20 mx-auto mb-4" style={{ color: COLORS.gray200 }} />
-                  <h4 className="text-xl font-bold mb-2" style={{ color: COLORS.gray800 }}>No Package Activations Yet</h4>
-                  <p className="text-sm mb-6" style={{ color: COLORS.gray600 }}>
-                    You haven't activated any packages yet. Browse our pricing page to get started!
-                  </p>
-                  <a
-                    href="/pricing"
-                    className="inline-block px-6 py-3 rounded-lg font-bold text-white transition-all hover:opacity-90"
-                    style={{ backgroundColor: COLORS.primary }}
-                  >
-                    View Packages
-                  </a>
-                </div>
-              )}
             </div>
           </div>
         </div>
@@ -352,4 +554,3 @@ const UserProfilePage: React.FC = () => {
 };
 
 export default UserProfilePage;
-

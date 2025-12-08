@@ -25,6 +25,7 @@ import PackageActivationManage from "./pages/admin/PackageActivationManage";
 import PricingPage from "./pages/PricingPage";
 import PackageAppointmentPage from "./pages/PackageAppointmentPage";
 import UserProfilePage from "./pages/UserProfilePage";
+import ClientDashboardPage from "./pages/admin/ClientDashboardPage";
 
 export default function App() {
   return (
@@ -70,6 +71,7 @@ export default function App() {
             />
             <Route path="view-appointments" element={<AppointmentsPage/>}/>
             <Route index element={<Navigate to="dashboard" replace />} />
+            <Route path="clients/:email" element={<ClientDashboardPage/>}/>
           </Route>
         </Routes>
       </BrowserRouter>

@@ -991,12 +991,21 @@ export default function ReservationsPage() {
                       >
                         {appointment.reservationId}
                       </td>
-                      <td
-                        className="px-6 py-4 font-medium"
-                        style={{ color: COLOR_TEXT_DARK }}
-                      >
-                        {appointment.clientName || "N/A"}
-                      </td>
+                      <td
+                        className="px-6 py-4 font-medium"
+                        style={{ color: COLOR_TEXT_DARK }}
+                      >
+                        <button
+                          type="button"
+                          // Use client's email for unique identification and navigation
+                          onClick={() => navigate(`/admin/clients/${appointment.email}`)}
+                          className="font-medium hover:underline"
+                          style={{ color: COLOR_TEXT_DARK }}
+                          title={`View full dashboard for ${appointment.clientName}`}
+                        >
+                          {appointment.clientName || "N/A"}
+                        </button>
+                      </td>
                       <td className="px-6 py-4" style={{ color: COLOR_MUTED }}>
                         {appointment.email ? (
                           <a 

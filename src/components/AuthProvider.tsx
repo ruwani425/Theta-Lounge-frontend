@@ -3,8 +3,9 @@ import React, { useEffect } from 'react';
 import { Provider, useSelector, useDispatch } from 'react-redux';
 import type { AppDispatch, RootState } from '../redux/store';
 import { store } from '../redux/store'; 
-import { checkAuthStatus, loginAction, logoutAction } from '../redux/authSlice';
-
+// FIX: Import AuthUser for correct type hinting
+import { checkAuthStatus, loginAction, logoutAction } from '../redux/authSlice'; 
+import type { AuthUser } from '../redux/authSlice'; // <-- FIX: Use 'import type' for AuthUser
 
 interface AuthProviderProps {
     children: React.ReactNode;
@@ -13,6 +14,7 @@ interface AuthProviderProps {
 // --- AuthInitializer Component ---
 
 const AuthInitializer: React.FC<AuthProviderProps> = ({ children }) => {
+// ... (AuthInitializer content remains the same)
     const dispatch = useDispatch<AppDispatch>();
     const { isLoading } = useSelector((state: RootState) => state.auth); 
 
@@ -53,8 +55,10 @@ export const useAuth = () => {
     return {
         isAuthenticated: auth.isAuthenticated,
         userRole: auth.userRole,
+        user: auth.user, // <-- FIX: Return the user object
         isLoading: auth.isLoading,
-        login: (role: 'admin' | 'client', token?: string) => dispatch(loginAction({ role, token })),
+        // FIX: Update login signature to accept user data
+        login: (role: 'admin' | 'client', token?: string, user?: AuthUser) => dispatch(loginAction({ role, token, user })),
         logout: () => dispatch(logoutAction()),
     };
 };
