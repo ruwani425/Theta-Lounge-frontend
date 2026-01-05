@@ -43,7 +43,7 @@ The Theta Lounge frontend focuses on performance, aesthetics, and usability, del
 
 ### 🌿 Client Interface
 ![Login Page](screencapture-theta-lounge-frontend-vercel-app-login-2026-01-05-17_42_30.png)
-![Home Page](screencapture-theta-lounge-frontend-vercel-app-2026-01-05-17_53_49.png)
+![Home Page](screencapture-theta-lounge-frontend-vercel-app-2026-01-05-18_02_25.png)
 ![Appointments](screencapture-theta-lounge-frontend-vercel-app-appointments-2026-01-05-17_41_20.png)
 ![About Page](screencapture-theta-lounge-frontend-vercel-app-about-2026-01-05-17_39_41.png)
 ![Pricing](screencapture-theta-lounge-frontend-vercel-app-pricing-2026-01-05-17_41_48.png)
