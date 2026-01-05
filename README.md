@@ -39,6 +39,27 @@ The Theta Lounge frontend focuses on performance, aesthetics, and usability, del
 
 ---
 
+## 📸 Screenshots
+
+### 🌿 Client Interface
+![Login Page](screencapture-theta-lounge-frontend-vercel-app-login-2026-01-05-17_42_30.png)
+![Home Page](screencapture-theta-lounge-frontend-vercel-app-2026-01-05-17_53_49.png)
+![Appointments](screencapture-theta-lounge-frontend-vercel-app-appointments-2026-01-05-17_41_20.png)
+![About Page](screencapture-theta-lounge-frontend-vercel-app-about-2026-01-05-17_39_41.png)
+![Pricing](screencapture-theta-lounge-frontend-vercel-app-pricing-2026-01-05-17_41_48.png)
+
+### 🛠 Admin Dashboard
+![Admin Dashboard](screencapture-theta-lounge-frontend-vercel-app-admin-dashboard-2026-01-05-17_44_24.png)
+![Reports](screencapture-theta-lounge-frontend-vercel-app-admin-reports-2026-01-05-17_45_05.png)
+![Calendar](screencapture-theta-lounge-frontend-vercel-app-admin-calendar-management-2026-01-05-17_43_38.png)
+![Package Activations](screencapture-theta-lounge-frontend-vercel-app-admin-package-activations-2026-01-05-17_44_39.png)
+![Reservations](screencapture-theta-lounge-frontend-vercel-app-admin-reservations-2026-01-05-17_43_07.png)
+![Users management](screencapture-theta-lounge-frontend-vercel-app-admin-users-2026-01-05-17_44_05.png)
+![Tank management](screencapture-theta-lounge-frontend-vercel-app-admin-tank-management-2026-01-05-17_43_52.png)
+![Access control](screencapture-theta-lounge-frontend-vercel-app-admin-access-controll-2026-01-05-17_45_40.png)
+---
+
+
 ## 🛠 Technologies & Tools
 
 ### Frontend Stack
