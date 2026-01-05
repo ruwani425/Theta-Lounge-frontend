@@ -129,6 +129,14 @@ src/
 
 ```
 
+## 🚀 Live Deployment
+
+- 🌍 **Frontend Application**  
+  https://theta-lounge-frontend.vercel.app
+
+- ⚙️ **Backend REST API**  
+  https://theta-lounge-backend.vercel.app
+
 ## License
 
 All rights reserved.
