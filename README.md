@@ -42,23 +42,18 @@ The Floating Theraphy frontend focuses on performance, aesthetics, and usability
 ## 📸 Screenshots
 
 ### 🌿 Client Interface
-![Login Page]
-![Home Page]
-![Appointments]
-![About Page]
-![Pricing]
+| Login | Appointments | Pricing |
+| :---: | :---: | :---: |
+| <img src="https://github.com/user-attachments/assets/98cd1ea0-0690-4838-9708-6e14823ba339" width="300" /> | <img src="https://github.com/user-attachments/assets/2f2972da-e991-4e01-9a0a-6ace8c158f03" width="300" /> | <img src="https://github.com/user-attachments/assets/cabf9dbd-e455-492b-9808-177db2598d96" width="300" /> |
 
 ### 🛠 Admin Dashboard
-![Admin Dashboard]
-![Reports]
-![Calendar]
-![Package Activations]
-![Reservations]
-![Users management]
-![Tank management]
-![Access control]
----
+| Dashboard | Calendar Management |
+| :---: | :---: |
+| <img src="https://github.com/user-attachments/assets/3c96215d-26be-4141-b69d-089b66908d43" width="450" /> | <img src="https://github.com/user-attachments/assets/baa4479e-1a41-49a6-a57a-8687c8c46c65" width="450" /> |
 
+| Package Activations | Reports |
+| :---: | :---: |
+| <img src="https://github.com/user-attachments/assets/e7382a27-4a7e-4d03-886a-9265f4518597" width="450" /> | <img src="https://github.com/user-attachments/assets/82e0f3bd-2b23-4b2c-abd9-06c22bf59e31" width="450" /> |
 
 ## 🛠 Technologies & Tools
 
