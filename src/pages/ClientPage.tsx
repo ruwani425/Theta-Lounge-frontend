@@ -58,7 +58,7 @@ const coreBenefits = [
     position: "right-bottom",
   },
 ];
-// Mock data for the services section
+
 const servicesData = [
   {
     title: "Swedish Massage",
@@ -762,7 +762,7 @@ const Blog: React.FC = () => {
 };
 
 /**
- * Main wrapper for the Theta Lounge homepage.
+ * Main wrapper for the Floating Theraphy homepage.
  */
 const HomePage: React.FC = () => {
   const CustomStyle = `

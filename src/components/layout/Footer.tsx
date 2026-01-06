@@ -36,7 +36,7 @@ const Footer: React.FC = () => {
 
           <div className="flex items-center justify-center space-x-3 text-4xl font-serif font-bold text-white mb-8">
             <Flower className="w-10 h-10 text-white" />
-            <span className="tracking-wide">Theta Lounge</span>
+            <span className="tracking-wide">Floating Theraphy</span>
           </div>
 
           <div className="flex flex-wrap justify-center items-center gap-4">

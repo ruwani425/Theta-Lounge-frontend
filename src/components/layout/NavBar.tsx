@@ -88,7 +88,7 @@ const NavBar: React.FC = () => {
             </div>
             <div className="flex flex-col">
               <span className="font-serif text-lg font-bold text-gray-800 group-hover:text-theta-blue transition-colors duration-300 leading-none">
-                Theta Lounge
+                Floating Theraphy
               </span>
               <span className="text-[10px] font-medium text-gray-500 tracking-wide hidden sm:block leading-none mt-0.5">
                 Physical Therapy

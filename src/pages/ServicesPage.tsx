@@ -240,7 +240,7 @@ const ServicesPage: React.FC = () => {
             variants={fadeInUp}
             className="text-base sm:text-lg md:text-xl text-white/90 leading-relaxed max-w-2xl mx-auto"
           >
-            At Theta Lounge, <strong>chiropractic care</strong> is at the center of everything we do. 
+            At Floating Theraphy, <strong>chiropractic care</strong> is at the center of everything we do. 
             We restore balance, relieve pain, and help your body function at its best.
           </motion.p>
         </motion.div>

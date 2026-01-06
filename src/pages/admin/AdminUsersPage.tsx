@@ -384,7 +384,7 @@ const AdminUsersPage: React.FC = () => {
                 User Management
               </h1>
               <p className="mt-2 text-xs md:text-sm font-bold uppercase tracking-wider" style={{ color: COLORS.medium }}>
-                Theta Lounge Operations
+                Floating Theraphy Operations
               </p>
             </div>
           </div>

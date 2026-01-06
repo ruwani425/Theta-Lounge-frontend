@@ -203,7 +203,7 @@ const AboutPage: React.FC = () => {
           </motion.div>
 
           <motion.h1 variants={fadeInUp} className="text-5xl md:text-7xl font-serif font-bold mb-6">
-            About Theta Lounge
+            About Floating Theraphy
           </motion.h1>
 
           <motion.p variants={fadeInUp} className="text-xl md:text-2xl text-blue-100 mb-12 max-w-3xl mx-auto">
@@ -238,7 +238,7 @@ const AboutPage: React.FC = () => {
                 Healing Through Alignment
               </motion.h2>
               <motion.div variants={fadeInUp} className="space-y-6 text-gray-600 text-lg">
-                <p>At Theta Lounge, we believe true health begins with proper alignment. Our mission is simple: to help people move freely and live without pain.</p>
+                <p>At Floating Theraphy, we believe true health begins with proper alignment. Our mission is simple: to help people move freely and live without pain.</p>
                 <p>Founded by Dr. Sarah Mitchell, our practice has grown into a comprehensive wellness center where we prioritize long-term partnerships over quick fixes.</p>
               </motion.div>
               <motion.div variants={staggerContainer} className="mt-8 space-y-4">

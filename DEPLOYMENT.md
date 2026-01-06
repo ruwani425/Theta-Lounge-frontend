@@ -1,6 +1,6 @@
-# Deployment Guide - Theta Lounge Frontend
+# Deployment Guide - Floating Theraphy Frontend
 
-This guide explains how to deploy the Theta Lounge Frontend to a VPS using GitHub Actions and Docker.
+This guide explains how to deploy the Floating Theraphy Frontend to a VPS using GitHub Actions and Docker.
 
 ## Prerequisites
 

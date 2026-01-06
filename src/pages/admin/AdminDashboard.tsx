@@ -377,7 +377,7 @@ const AdminDashboard: React.FC = () => {
                   Admin Dashboard
                 </h1>
                 <p className="text-xs font-bold uppercase tracking-widest" style={{ color: THETA_COLORS.mediumBlue }}>
-                  Theta Lounge Operations
+                  Floating Theraphy Operations
                 </p>
               </div>
             </div>

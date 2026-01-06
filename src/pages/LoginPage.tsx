@@ -131,7 +131,7 @@ const LoginPage: React.FC = () => {
               </div>
             </div>
             <h1 className="text-4xl font-bold text-slate-900 tracking-tight">
-              Theta Lounge
+              Floating Theraphy
             </h1>
             <p className="text-lg text-slate-600 font-light">
               Welcome to Your Sanctuary

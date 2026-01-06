@@ -10,7 +10,7 @@ export default {
   theme: {
     // We use 'extend' to add new values without removing Tailwind's defaults.
     extend: {
-      // Custom color palette for "Theta Lounge"
+      // Custom color palette for "Floating Theraphy"
       colors: {
         'theta-blue': {
           // Primary color (Darkest Blue: #035C84) - Used for buttons, main text
