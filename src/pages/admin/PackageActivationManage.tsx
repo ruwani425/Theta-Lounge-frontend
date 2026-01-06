@@ -112,18 +112,18 @@ const activationApiService = {
     status: string,
     startDate?: string // New optional parameter
   ): Promise<{ success: boolean; data: PackageActivation }> => {
-    // 🛑 MODIFIED: Construct payload including startDate if status is Confirmed
     const payload: { status: string; startDate?: string } = { status };
     if (startDate) { // Send startDate if provided, regardless of whether it's the first time confirming.
         payload.startDate = startDate;
     }
 
-    const response: any = await apiRequest.patch(
-      `/package-activations/${id}/status`,
-      payload
-    );
-    return response;
-  },
+    const response: any = await apiRequest.patch(
+        `/package-activations/${id}/status`,
+        payload,
+        {}
+    );
+    return response;
+},
 };
 
 // --- STATUS BADGE COMPONENT ---
