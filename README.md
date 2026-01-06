@@ -38,15 +38,32 @@ The Floating Theraphy frontend focuses on performance, aesthetics, and usability
 - Optimized production builds
 
 ---
+I have updated the README code to include your two new screenshots. I've placed the Landing Page at the top of the Client Interface section (as it's usually the first thing people see) and added the Services page to the grid.
+
+Since you now have 5 client-side images, I have organized them into a 3+2 layout to keep the grid looking balanced and professional.
+
+Markdown
+
+# 🌿 Theta Lounge Project
+
+A comprehensive management system featuring a sleek client interface and a robust administrative dashboard for appointment scheduling, pricing management, and reporting.
+
+---
 
 ## 📸 Screenshots
-
 ### 🌿 Client Interface
-| Login | Appointments | Pricing |
-| :---: | :---: | :---: |
-| <img src="https://github.com/user-attachments/assets/98cd1ea0-0690-4838-9708-6e14823ba339" width="300" /> | <img src="https://github.com/user-attachments/assets/2f2972da-e991-4e01-9a0a-6ace8c158f03" width="300" /> | <img src="https://github.com/user-attachments/assets/cabf9dbd-e455-492b-9808-177db2598d96" width="300" /> |
 
+| Home Page | Login | Appointments |
+| :---: | :---: | :---: |
+| <img src="https://github.com/user-attachments/assets/a0e044ce-3723-41d6-9f40-36d6f6e941f5" width="300" /> | <img src="https://github.com/user-attachments/assets/98cd1ea0-0690-4838-9708-6e14823ba339" width="300" /> | <img src="https://github.com/user-attachments/assets/2f2972da-e991-4e01-9a0a-6ace8c158f03" width="300" /> |
+
+| Services | Pricing |
+| :---: | :---: |
+| <img src="https://github.com/user-attachments/assets/461938bc-f27f-447a-a63f-432734263023" width="300" /> | <img src="https://github.com/user-attachments/assets/cabf9dbd-e455-492b-9808-177db2598d96" width="300" /> |
+
+---
 ### 🛠 Admin Dashboard
+
 | Dashboard | Calendar Management |
 | :---: | :---: |
 | <img src="https://github.com/user-attachments/assets/3c96215d-26be-4141-b69d-089b66908d43" width="450" /> | <img src="https://github.com/user-attachments/assets/baa4479e-1a41-49a6-a57a-8687c8c46c65" width="450" /> |
@@ -55,6 +72,7 @@ The Floating Theraphy frontend focuses on performance, aesthetics, and usability
 | :---: | :---: |
 | <img src="https://github.com/user-attachments/assets/e7382a27-4a7e-4d03-886a-9265f4518597" width="450" /> | <img src="https://github.com/user-attachments/assets/82e0f3bd-2b23-4b2c-abd9-06c22bf59e31" width="450" /> |
 
+---
 ## 🛠 Technologies & Tools
 
 ### Frontend Stack
